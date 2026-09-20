@@ -1,5 +1,5 @@
 import XCTest
-@testable import AdbProxy
+@testable import AutoProxy
 
 final class CaptureStateTests: XCTestCase {
     private let phone = Device(serial: "R3CT10FAKE1", model: "SM_S9110", state: "device")

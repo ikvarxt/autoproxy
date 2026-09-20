@@ -3,20 +3,20 @@
 import PackageDescription
 
 let package = Package(
-    name: "AdbProxy",
+    name: "AutoProxy",
     platforms: [
         .macOS(.v13)
     ],
     products: [
-        .executable(name: "AdbProxy", targets: ["AdbProxy"])
+        .executable(name: "AutoProxy", targets: ["AutoProxy"])
     ],
     targets: [
         .executableTarget(
-            name: "AdbProxy"
+            name: "AutoProxy"
         ),
         .testTarget(
-            name: "AdbProxyTests",
-            dependencies: ["AdbProxy"]
+            name: "AutoProxyTests",
+            dependencies: ["AutoProxy"]
         )
     ]
 )

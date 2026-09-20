@@ -4,7 +4,7 @@ import UniformTypeIdentifiers
 final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = Coordinator()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
-    private let probeQueue = DispatchQueue(label: "me.ikvarxt.adbproxy.probe")
+    private let probeQueue = DispatchQueue(label: "me.ikvarxt.autoproxy.probe")
 
     private var monitor: DeviceMonitor?
     private var timer: Timer?

@@ -3,13 +3,13 @@
 <plist version="1.0">
 <dict>
 	<key>CFBundleName</key>
-	<string>AdbProxy</string>
+	<string>AutoProxy</string>
 	<key>CFBundleDisplayName</key>
-	<string>AdbProxy</string>
+	<string>AutoProxy</string>
 	<key>CFBundleExecutable</key>
-	<string>AdbProxy</string>
+	<string>AutoProxy</string>
 	<key>CFBundleIdentifier</key>
-	<string>me.ikvarxt.adbproxy</string>
+	<string>me.ikvarxt.autoproxy</string>
 	<key>CFBundlePackageType</key>
 	<string>APPL</string>
 	<key>CFBundleShortVersionString</key>

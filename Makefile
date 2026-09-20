@@ -1,6 +1,6 @@
-APP_NAME := AdbProxy
-BUNDLE_ID := me.ikvarxt.adbproxy
-EXECUTABLE := AdbProxy
+APP_NAME := AutoProxy
+BUNDLE_ID := me.ikvarxt.autoproxy
+EXECUTABLE := AutoProxy
 CONFIG := release
 BUILD_DIR := .build/$(CONFIG)
 APP_BUNDLE := build/$(APP_NAME).app

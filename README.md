@@ -1,4 +1,4 @@
-# AdbProxy
+# AutoProxy
 
 一个 macOS 菜单栏小工具，管 Android 手机走 USB 线的抓包链路。
 
@@ -48,7 +48,7 @@ USB 线一拔，adb 连接同时断开，Mac 再也问不到手机的状态。�
 
 ```bash
 make test      # 单元测试
-make app       # 产出 build/AdbProxy.app
+make app       # 产出 build/AutoProxy.app
 make run       # 构建并启动
 make install   # 装到 /Applications
 ```

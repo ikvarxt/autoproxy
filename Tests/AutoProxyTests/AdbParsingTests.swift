@@ -1,5 +1,5 @@
 import XCTest
-@testable import AdbProxy
+@testable import AutoProxy
 
 final class AdbParsingTests: XCTestCase {
     func testParseDevicesReadsSerialStateAndModel() {
