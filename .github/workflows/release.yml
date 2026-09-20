@@ -2,40 +2,59 @@ name: Release
 
 on:
   push:
-    tags: ['v*']
+    branches: [main]
   workflow_dispatch:
-    inputs:
-      tag:
-        description: '要发布的 tag，如 v0.2.0'
-        required: true
 
 permissions:
   contents: write
 
+concurrency:
+  group: release
+  cancel-in-progress: false
+
 jobs:
-  release:
-    runs-on: macos-15
+  # 版本号只有一个出处：Resources/Info.plist 的 CFBundleShortVersionString。
+  # 这一步在 ubuntu 上跑是因为 macOS runner 按 10 倍计费，而绝大多数 push
+  # 并不伴随版本号变化，没必要为了读一个字符串开 macOS 机器。
+  check:
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.v.outputs.version }}
+      needed: ${{ steps.v.outputs.needed }}
     steps:
       - uses: actions/checkout@v4
         with:
-          ref: ${{ inputs.tag || github.ref }}
           fetch-depth: 0
 
-      - name: Resolve version
-        id: v
+      - id: v
         run: |
-          TAG="${{ inputs.tag || github.ref_name }}"
-          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
-          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+          VERSION=$(python3 -c "import plistlib;print(plistlib.load(open('Resources/Info.plist','rb'))['CFBundleShortVersionString'])")
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          if git rev-parse -q --verify "refs/tags/v$VERSION" >/dev/null; then
+            echo "needed=false" >> "$GITHUB_OUTPUT"
+            echo "v$VERSION 已发布过，跳过"
+          else
+            echo "needed=true" >> "$GITHUB_OUTPUT"
+            echo "要发 v$VERSION"
+          fi
+
+  release:
+    needs: check
+    if: needs.check.outputs.needed == 'true'
+    runs-on: macos-15
+    env:
+      VERSION: ${{ needs.check.outputs.version }}
+    steps:
+      - uses: actions/checkout@v4
 
       - name: Test
         run: swift test
 
       - name: Build app bundle
-        run: make app VERSION=${{ steps.v.outputs.version }} BUILD_NUMBER=${{ github.run_number }}
+        run: make app VERSION=$VERSION BUILD_NUMBER=${{ github.run_number }}
 
       - name: Pack
-        run: ditto -c -k --keepParent build/AutoProxy.app AutoProxy-${{ steps.v.outputs.version }}.zip
+        run: ditto -c -k --keepParent build/AutoProxy.app AutoProxy-$VERSION.zip
 
       - name: Publish
         env:
@@ -57,8 +76,8 @@ jobs:
 
           ---
           NOTES
-          gh release create "${{ steps.v.outputs.tag }}" \
-            "AutoProxy-${{ steps.v.outputs.version }}.zip" \
-            --title "AutoProxy ${{ steps.v.outputs.version }}" \
+          gh release create "v$VERSION" "AutoProxy-$VERSION.zip" \
+            --target "$GITHUB_SHA" \
+            --title "AutoProxy $VERSION" \
             --notes-file notes.md \
             --generate-notes

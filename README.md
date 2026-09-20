@@ -69,12 +69,17 @@ make install   # 只拷贝，不跑测试、不重启
 
 ## 发布
 
-推一个 `v` 开头的 tag，流水线会跑测试、按 tag 写进 `CFBundleShortVersionString`、
-打包上传到 GitHub Release：
+版本号只有一个出处：`Resources/Info.plist` 里的 `CFBundleShortVersionString`，语义化版本。
+
+发版就是改这个数字然后推 main —— 流水线读到一个还没打过 tag 的版本号就自动建 tag、
+构建、发 Release；版本号没动就什么也不做。
 
 ```bash
-git tag v0.2.0 && git push origin v0.2.0
+/usr/libexec/PlistBuddy -c 'Set :CFBundleShortVersionString 0.2.0' Resources/Info.plist
+git commit -am 'chore: 0.2.0' && git push
 ```
+
+`CFBundleVersion` 不用管，构建时会被流水线的 run number 覆盖。
 
 下载下来的包是 ad-hoc 签名的，Gatekeeper 会拦，装完要去掉隔离属性：
 
