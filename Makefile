@@ -5,6 +5,8 @@ CONFIG := release
 BUILD_DIR := .build/$(CONFIG)
 APP_BUNDLE := build/$(APP_NAME).app
 SIGN_IDENTITY := -
+VERSION :=
+BUILD_NUMBER :=
 
 -include local.mk
 
@@ -23,6 +25,12 @@ app: build
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
 	cp $(BUILD_DIR)/$(EXECUTABLE) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	cp Resources/Info.plist $(APP_BUNDLE)/Contents/Info.plist
+ifneq ($(VERSION),)
+	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist
+endif
+ifneq ($(BUILD_NUMBER),)
+	/usr/libexec/PlistBuddy -c "Set :CFBundleVersion $(BUILD_NUMBER)" $(APP_BUNDLE)/Contents/Info.plist
+endif
 	codesign --force --sign "$(SIGN_IDENTITY)" $(APP_BUNDLE)
 	@echo "built $(APP_BUNDLE)"
 

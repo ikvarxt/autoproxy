@@ -1,5 +1,7 @@
 # AutoProxy
 
+[![CI](https://github.com/ikvarxt/autoproxy/actions/workflows/ci.yml/badge.svg)](https://github.com/ikvarxt/autoproxy/actions/workflows/ci.yml)
+
 一个 macOS 菜单栏小工具，管 Android 手机走 USB 线的抓包链路。
 
 把手机的 HTTP 流量导到 Mac 上的 Reqable / Charles / mitmproxy，全程不经过 Wi-Fi：
@@ -64,6 +66,21 @@ make install   # 只拷贝，不跑测试、不重启
 
 部署时是 `pkill` 掉旧实例而不是让它正常退出 —— 正常退出会顺手清掉手机上的代理，
 等于每次部署都把进行中的抓包给停了。杀掉后隧道和代理原样留着，新实例起来接着管。
+
+## 发布
+
+推一个 `v` 开头的 tag，流水线会跑测试、按 tag 写进 `CFBundleShortVersionString`、
+打包上传到 GitHub Release：
+
+```bash
+git tag v0.2.0 && git push origin v0.2.0
+```
+
+下载下来的包是 ad-hoc 签名的，Gatekeeper 会拦，装完要去掉隔离属性：
+
+```bash
+xattr -dr com.apple.quarantine /Applications/AutoProxy.app
+```
 
 改图标后想肉眼比对七个状态：
 

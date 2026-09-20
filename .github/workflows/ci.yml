@@ -1,0 +1,37 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  build:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Toolchain
+        run: swift --version
+
+      - name: Test
+        run: swift test
+
+      - name: Build app bundle
+        run: make app
+
+      # actions/upload-artifact 会丢掉可执行位，.app 传上去就打不开了。
+      # 先 ditto 成 zip，下载解压后仍是一个能双击的 bundle。
+      - name: Pack
+        run: ditto -c -k --keepParent build/AutoProxy.app AutoProxy.zip
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: AutoProxy-${{ github.sha }}
+          path: AutoProxy.zip
+          retention-days: 14

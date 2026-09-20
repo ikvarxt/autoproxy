@@ -1,0 +1,64 @@
+name: Release
+
+on:
+  push:
+    tags: ['v*']
+  workflow_dispatch:
+    inputs:
+      tag:
+        description: '要发布的 tag，如 v0.2.0'
+        required: true
+
+permissions:
+  contents: write
+
+jobs:
+  release:
+    runs-on: macos-15
+    steps:
+      - uses: actions/checkout@v4
+        with:
+          ref: ${{ inputs.tag || github.ref }}
+          fetch-depth: 0
+
+      - name: Resolve version
+        id: v
+        run: |
+          TAG="${{ inputs.tag || github.ref_name }}"
+          echo "tag=$TAG" >> "$GITHUB_OUTPUT"
+          echo "version=${TAG#v}" >> "$GITHUB_OUTPUT"
+
+      - name: Test
+        run: swift test
+
+      - name: Build app bundle
+        run: make app VERSION=${{ steps.v.outputs.version }} BUILD_NUMBER=${{ github.run_number }}
+
+      - name: Pack
+        run: ditto -c -k --keepParent build/AutoProxy.app AutoProxy-${{ steps.v.outputs.version }}.zip
+
+      - name: Publish
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          cat > notes.md <<'NOTES'
+          ## 安装
+
+          解压后把 `AutoProxy.app` 拖进「应用程序」，然后去掉隔离属性：
+
+          ```bash
+          xattr -dr com.apple.quarantine /Applications/AutoProxy.app
+          ```
+
+          这一步省不掉：产物是 ad-hoc 签名的，没有 Apple Developer ID，
+          从浏览器下载的包会被 Gatekeeper 标记为不可信。
+
+          需要 macOS 13 以上，以及 PATH 里能找到 `adb`。
+
+          ---
+          NOTES
+          gh release create "${{ steps.v.outputs.tag }}" \
+            "AutoProxy-${{ steps.v.outputs.version }}.zip" \
+            --title "AutoProxy ${{ steps.v.outputs.version }}" \
+            --notes-file notes.md \
+            --generate-notes
