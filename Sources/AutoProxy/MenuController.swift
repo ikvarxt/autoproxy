@@ -177,13 +177,8 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     private func render() {
         renderedKey = state.headline
-        statusItem.button?.attributedTitle = NSAttributedString(
-            string: state.glyph,
-            attributes: [
-                .foregroundColor: color(for: state),
-                .font: NSFont.systemFont(ofSize: 13),
-            ]
-        )
+        statusItem.button?.image = StatusIcon.image(for: state.icon)
+        statusItem.button?.toolTip = state.headline
 
         guard let menu = statusItem.menu else { return }
         menu.removeAllItems()
@@ -228,15 +223,5 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let item = NSMenuItem(title: title, action: action, keyEquivalent: key)
         item.target = self
         menu.addItem(item)
-    }
-
-    private func color(for state: CaptureState) -> NSColor {
-        switch state {
-        case .capturing: return .systemGreen
-        case .offlineStranded, .brokenLink: return .systemRed
-        case .unauthorized, .adbMissing: return .systemOrange
-        case .ready(_, let listening): return listening ? .secondaryLabelColor : .systemOrange
-        case .noDevice: return .tertiaryLabelColor
-        }
     }
 }

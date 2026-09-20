@@ -53,6 +53,12 @@ make run       # 构建并启动
 make install   # 装到 /Applications
 ```
 
+改图标后想肉眼比对七个状态：
+
+```bash
+ICON_SHEET_DIR=/tmp swift test --filter IconSheet && open /tmp/icons.png
+```
+
 签名身份默认 ad-hoc。要用自己的证书，建一个不入库的 `local.mk`：
 
 ```make

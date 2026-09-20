@@ -78,14 +78,48 @@ extension CaptureState {
     }
 }
 
+/// 图标的语义描述。形状管「设备在不在、链路通不通」，颜色只管「要不要管它」——
+/// 七个状态各有各的组合，不靠辨色也能分开。渲染在 StatusIcon，这里保持与 AppKit 无关。
+struct IconStyle: Equatable, Hashable {
+    enum Cable: Hashable {
+        case absent
+        case connected
+        case broken
+    }
+
+    enum Tint: Hashable {
+        case neutral
+        case dimmed
+        case active
+        case warning
+        case alert
+    }
+
+    /// false 时手机画成虚线轮廓，表示它已经不在这台 Mac 上
+    var devicePresent: Bool
+    var capturing: Bool
+    var cable: Cable
+    var tint: Tint
+}
+
 extension CaptureState {
-    /// 形状和颜色双编码，不依赖辨色也能区分
-    var glyph: String {
+    var icon: IconStyle {
         switch self {
-        case .capturing: return "●"
-        case .ready(_, let listening): return listening ? "●" : "○"
-        case .noDevice: return "○"
-        case .offlineStranded, .brokenLink, .unauthorized, .adbMissing: return "▲"
+        case .capturing:
+            return IconStyle(devicePresent: true, capturing: true, cable: .connected, tint: .active)
+        case .ready(_, let listening):
+            return IconStyle(devicePresent: true, capturing: false, cable: .connected,
+                             tint: listening ? .neutral : .warning)
+        case .brokenLink:
+            return IconStyle(devicePresent: true, capturing: false, cable: .broken, tint: .alert)
+        case .offlineStranded:
+            return IconStyle(devicePresent: false, capturing: false, cable: .broken, tint: .alert)
+        case .unauthorized:
+            return IconStyle(devicePresent: true, capturing: false, cable: .absent, tint: .warning)
+        case .noDevice:
+            return IconStyle(devicePresent: false, capturing: false, cable: .absent, tint: .dimmed)
+        case .adbMissing:
+            return IconStyle(devicePresent: false, capturing: false, cable: .absent, tint: .warning)
         }
     }
 }

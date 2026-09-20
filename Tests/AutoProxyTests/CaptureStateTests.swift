@@ -74,15 +74,24 @@ final class CaptureStateTests: XCTestCase {
         guard case .noDevice = CaptureState.derive(from: snapshot()) else { return XCTFail("期望 noDevice") }
     }
 
-    func testEveryStateHasHeadlineAndGlyph() {
+    func testEveryStateIsDistinguishableOnTheMenuBar() {
+        let phone = Device(serial: "S", model: "SM_S9110", state: "device")
         let states: [CaptureState] = [
             .adbMissing, .noDevice, .offlineStranded(model: "SM_S9110", port: 9000),
-            .unauthorized(phone), .ready(phone, portListening: false),
+            .unauthorized(phone), .ready(phone, portListening: true), .ready(phone, portListening: false),
             .capturing(phone), .brokenLink(phone, reason: "隧道没了"),
         ]
+
         for state in states {
             XCTAssertFalse(state.headline.isEmpty, "\(state) 没有状态文案")
-            XCTAssertFalse(state.glyph.isEmpty, "\(state) 没有图标")
         }
+
+        // 图标是常驻的唯一信号，两个状态画得一样就等于少了一个状态
+        let icons = states.map(\.icon)
+        XCTAssertEqual(Set(icons).count, icons.count, "有状态画出了相同的图标")
+
+        // 颜色可能辨不出来，形状必须能分
+        let shapes = icons.map { [$0.devicePresent, $0.capturing, "\($0.cable)"] as [AnyHashable] }
+        XCTAssertGreaterThanOrEqual(Set(shapes).count, 5, "形状区分度不足，只靠颜色撑不住")
     }
 }
