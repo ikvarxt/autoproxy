@@ -8,7 +8,7 @@ SIGN_IDENTITY := -
 
 -include local.mk
 
-.PHONY: all build test app run install uninstall clean
+.PHONY: all build test app run deploy install uninstall clean
 
 all: app
 
@@ -29,6 +29,9 @@ app: build
 run: app
 	pkill -x $(APP_NAME) || true
 	open $(APP_BUNDLE)
+
+deploy:
+	./scripts/deploy.sh
 
 install: app
 	pkill -x $(APP_NAME) || true

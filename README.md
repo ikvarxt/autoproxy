@@ -50,8 +50,20 @@ USB 线一拔，adb 连接同时断开，Mac 再也问不到手机的状态。�
 make test      # 单元测试
 make app       # 产出 build/AutoProxy.app
 make run       # 构建并启动
-make install   # 装到 /Applications
+make deploy    # 一把梭：测试 → 构建 → 装进 /Applications → 启动
+make install   # 只拷贝，不跑测试、不重启
 ```
+
+`make deploy` 等价于 `scripts/deploy.sh`，脚本还认这几个参数：
+
+| 参数 | 作用 |
+|---|---|
+| `--login` | 顺便设为登录启动（写 `~/Library/LaunchAgents/me.ikvarxt.autoproxy.plist`） |
+| `--no-login` | 取消登录启动 |
+| `--skip-tests` | 跳过单元测试 |
+
+部署时是 `pkill` 掉旧实例而不是让它正常退出 —— 正常退出会顺手清掉手机上的代理，
+等于每次部署都把进行中的抓包给停了。杀掉后隧道和代理原样留着，新实例起来接着管。
 
 改图标后想肉眼比对七个状态：
 
