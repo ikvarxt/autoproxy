@@ -14,7 +14,10 @@ struct Store {
             let stored = defaults.integer(forKey: Key.port)
             return stored > 0 ? stored : 9000
         }
-        nonmutating set { defaults.set(newValue, forKey: Key.port) }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.port)
+            defaults.synchronize()
+        }
     }
 
     func remember(device: Device, proxyOn: Bool, port: Int) {

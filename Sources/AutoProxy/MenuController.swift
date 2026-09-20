@@ -160,7 +160,10 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     private func apply(port: Int) {
-        coordinator.store.port = port
+        guard port != coordinator.store.port else { return }
+        var capturing = false
+        if case .capturing = state { capturing = true }
+        coordinator.changePort(to: port, device: state.device, wasCapturing: capturing)
         renderedKey = ""
         refresh()
     }

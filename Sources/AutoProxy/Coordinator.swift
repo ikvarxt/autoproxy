@@ -55,12 +55,21 @@ final class Coordinator {
         store.remember(device: device, proxyOn: true, port: port)
     }
 
-    func stop(_ device: Device) {
+    /// port 留空即当前配置的端口；改端口时要传旧端口，否则旧隧道拆不掉。
+    func stop(_ device: Device, port: Int? = nil) {
         guard let adb else { return }
+        let port = port ?? store.port
         // 同理，代理必须先于隧道撤销。
         adb.clearProxy(device.serial)
-        adb.removeAllReverses(device.serial)
-        store.remember(device: device, proxyOn: false, port: store.port)
+        adb.removeReverse(device.serial, port: port)
+        store.remember(device: device, proxyOn: false, port: port)
+    }
+
+    /// 换端口。正在抓包就把链路整条迁过去 —— 只改配置会把手机留在指向旧端口的断网状态。
+    func changePort(to port: Int, device: Device?, wasCapturing: Bool) {
+        if let device { stop(device, port: store.port) }
+        store.port = port
+        if let device, wasCapturing { start(device) }
     }
 
     /// 推证书并拉起系统的安装页。装不装由用户在设置里点 —— adb 发起的 CA 安装会被系统拒绝。

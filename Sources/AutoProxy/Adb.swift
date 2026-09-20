@@ -55,9 +55,10 @@ struct Adb {
         Shell.run(path, ["-s", serial, "reverse", "tcp:\(port)", "tcp:\(port)"])
     }
 
+    /// 只拆自己建的那条。`--remove-all` 会连带拆掉别的工具的隧道（如 RN 的 8081）。
     @discardableResult
-    func removeAllReverses(_ serial: String) -> CommandResult {
-        Shell.run(path, ["-s", serial, "reverse", "--remove-all"])
+    func removeReverse(_ serial: String, port: Int) -> CommandResult {
+        Shell.run(path, ["-s", serial, "reverse", "--remove", "tcp:\(port)"])
     }
 
     @discardableResult
