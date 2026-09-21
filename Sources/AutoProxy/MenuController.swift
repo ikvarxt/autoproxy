@@ -132,16 +132,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard !coordinator.store.startWarningAcknowledged else { return true }
 
         let alert = NSAlert()
-        alert.messageText = "用完要手动停止，别直接拔线"
-        alert.informativeText = """
-        开启后，\(device.label) 的系统代理会指向 127.0.0.1:\(coordinator.store.port)。
-
-        这条设置写进手机自己的系统里：拔线不会自动消失，重启也不丢，而且手机的设置界面里没有任何入口可以改它。
-
-        直接拔线的后果是手机信号满格、Wi-Fi 正常，但所有 App 都打不开网页 —— 流量全发向一个已经不存在的 USB 隧道。
-
-        用完在菜单里点「停止代理」；手机还插着时退出本工具，也会自动清理。
-        """
+        alert.messageText = "用完先点「停止代理」，再拔线"
+        alert.informativeText =
+            "代理设置留在 \(device.label) 上，拔线不会消失，手机上也没有入口能改 —— 直接拔走就是全程上不了网。"
 
         let acknowledged = NSButton(checkboxWithTitle: "我知道了，不用再提示", target: nil, action: nil)
         acknowledged.sizeToFit()
