@@ -158,3 +158,104 @@ final class InstallerTests: XCTestCase {
         XCTAssertTrue(FileManager.default.fileExists(atPath: dest.appendingPathComponent("marker").path))
     }
 }
+
+/// 拦下 Updater 发出的请求，按 URL 喂回预置的响应。
+private final class StubProtocol: URLProtocol {
+    /// URLProtocol 由系统实例化，塞不进依赖，只能走静态的。测试是串行的，够用。
+    static var feed: Data?
+
+    override class func canInit(with request: URLRequest) -> Bool { true }
+    override class func canonicalRequest(for request: URLRequest) -> URLRequest { request }
+
+    override func startLoading() {
+        guard let feed = StubProtocol.feed else {
+            client?.urlProtocol(self, didFailWithError: URLError(.notConnectedToInternet))
+            return
+        }
+        let response = HTTPURLResponse(url: request.url!, statusCode: 200, httpVersion: nil, headerFields: nil)!
+        client?.urlProtocol(self, didReceive: response, cacheStoragePolicy: .notAllowed)
+        client?.urlProtocol(self, didLoad: feed)
+        client?.urlProtocolDidFinishLoading(self)
+    }
+
+    override func stopLoading() {}
+}
+
+final class ManualCheckTests: XCTestCase {
+    private var suite: String!
+    private var defaults: UserDefaults!
+
+    override func setUp() {
+        super.setUp()
+        suite = "autoproxy.tests.\(UUID().uuidString)"
+        defaults = UserDefaults(suiteName: suite)
+        StubProtocol.feed = nil
+    }
+
+    override func tearDown() {
+        defaults.removePersistentDomain(forName: suite)
+        StubProtocol.feed = nil
+        super.tearDown()
+    }
+
+    private func updater(current: String) -> Updater {
+        let config = URLSessionConfiguration.ephemeral
+        config.protocolClasses = [StubProtocol.self]
+        return Updater(store: Store(defaults: defaults),
+                       current: Version(current)!,
+                       session: URLSession(configuration: config))
+    }
+
+    private func release(_ tag: String) -> Data {
+        """
+        {"tag_name":"\(tag)","draft":false,"prerelease":false,
+         "assets":[{"name":"AutoProxy-\(tag).zip","browser_download_url":"https://example.invalid/a.zip"}]}
+        """.data(using: .utf8)!
+    }
+
+    private func outcome(of updater: Updater) -> CheckOutcome? {
+        var result: CheckOutcome?
+        let done = expectation(description: "checked")
+        updater.check {
+            result = $0
+            done.fulfill()
+        }
+        wait(for: [done], timeout: 5)
+        return result
+    }
+
+    func testSaysUpToDateWhenTheLatestReleaseIsWhatWeAreRunning() {
+        StubProtocol.feed = release("v0.4.0")
+        guard case .upToDate = outcome(of: updater(current: "0.4.0")) else {
+            return XCTFail("应当报告已是最新")
+        }
+    }
+
+    func testReportsFailureRatherThanUpToDateWhenGitHubIsUnreachable() {
+        // 问不到和「已是最新」得分开说 —— 混在一起，网络挂了的人会以为自己手上就是最新版
+        guard case .failed = outcome(of: updater(current: "0.4.0")) else {
+            return XCTFail("网络失败不能报成已是最新")
+        }
+    }
+
+    func testGarbageResponseIsAFailureToo() {
+        StubProtocol.feed = Data("not json".utf8)
+        guard case .failed = outcome(of: updater(current: "0.4.0")) else {
+            return XCTFail("解析不了也算没问到")
+        }
+    }
+
+    func testAnnouncesTheDownloadBeforeItFinishes() {
+        StubProtocol.feed = release("v0.9.0")
+        guard case .downloading(let version) = outcome(of: updater(current: "0.4.0")) else {
+            return XCTFail("发现新版本时应当先回一句正在下载")
+        }
+        XCTAssertEqual("\(version)", "0.9.0")
+    }
+
+    func testRecordsTheCheckEvenWhenNothingIsNew() {
+        StubProtocol.feed = release("v0.4.0")
+        _ = outcome(of: updater(current: "0.4.0"))
+        XCTAssertNotNil(Store(defaults: defaults).lastUpdateCheck)
+    }
+}

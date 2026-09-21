@@ -51,6 +51,13 @@ enum AppInfo {
     static let bundleID = "me.ikvarxt.autoproxy"
     static let latestRelease = URL(string: "https://api.github.com/repos/ikvarxt/autoproxy/releases/latest")!
 
+    static let homepage = URL(string: "https://github.com/ikvarxt/autoproxy")!
+
+    /// 流水线的 run number，本地构建是 1。版本号相同的两个包靠它区分。
+    static var build: String {
+        Bundle.main.infoDictionary?["CFBundleVersion"] as? String ?? "?"
+    }
+
     static var runningVersion: Version {
         Version(Bundle.main.infoDictionary?["CFBundleShortVersionString"] as? String ?? "") ?? Version("0")!
     }
@@ -71,6 +78,14 @@ enum ReleaseFeed {
         guard let link = zip?["browser_download_url"] as? String, let url = URL(string: link) else { return nil }
         return Release(version: version, zip: url)
     }
+}
+
+/// 手动检查更新的结果。下载是异步的，所以 downloading 之后还会走 onStaged 那条路。
+enum CheckOutcome {
+    case ready(Version)
+    case downloading(Version)
+    case upToDate
+    case failed
 }
 
 /// 每天问一次 GitHub 有没有新版本，有就下回来放着。**什么时候装由调用方决定** ——
@@ -115,7 +130,14 @@ final class Updater {
     }
 
     /// 手动查一次，跳过 24 小时的门槛。只在主线程调。
-    func check() {
+    ///
+    /// report 是给「用户刚点了检查更新」那条路用的：他在等一句回话，查完什么都不说
+    /// 跟坏掉没区别。自动检查不传它 —— 没人在等，静默失败就好。
+    func check(reporting report: ((CheckOutcome) -> Void)? = nil) {
+        if let staged {
+            report?(.ready(staged.version))
+            return
+        }
         guard !busy else { return }
         busy = true
 
@@ -129,10 +151,17 @@ final class Updater {
 
             DispatchQueue.main.async {
                 self.store.lastUpdateCheck = Date()
-                guard let release, release.version > self.current else {
+                guard let release else {
                     self.busy = false
+                    report?(.failed)
                     return
                 }
+                guard release.version > self.current else {
+                    self.busy = false
+                    report?(.upToDate)
+                    return
+                }
+                report?(.downloading(release.version))
                 self.download(release)
             }
         }.resume()

@@ -383,7 +383,69 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
+    @objc private func showAbout() {
+        let alert = NSAlert()
+        alert.messageText = "AutoProxy \(AppInfo.runningVersion)"
+        alert.informativeText = aboutDetail()
+        alert.addButton(withTitle: "检查更新")
+        alert.addButton(withTitle: "项目主页")
+        alert.addButton(withTitle: "好")
+
+        switch runModal(alert) {
+        case .alertFirstButtonReturn: checkForUpdatesNow()
+        case .alertSecondButtonReturn: NSWorkspace.shared.open(AppInfo.homepage)
+        default: break
+        }
+    }
+
+    private func aboutDetail() -> String {
+        var lines = ["构建 \(AppInfo.build)"]
+
+        if let last = coordinator.store.lastUpdateCheck {
+            let formatter = DateFormatter()
+            formatter.dateStyle = .medium
+            formatter.timeStyle = .short
+            lines.append("上次检查更新：\(formatter.string(from: last))")
+        } else {
+            lines.append("还没检查过更新")
+        }
+
+        // 不在应用程序文件夹里时自动更新和系统通知都不成立，这儿是唯一还能说明白的地方
+        if InstallLocation.classify(bundle: Bundle.main.bundleURL).needsRelocation {
+            lines.append("")
+            lines.append("它现在不在「应用程序」文件夹里，自动更新装不上、拔线提醒也发不出系统通知。")
+        }
+
+        return lines.joined(separator: "\n")
+    }
+
+    private func checkForUpdatesNow() {
+        updater.check { [weak self] outcome in
+            guard let self else { return }
+            switch outcome {
+            case .upToDate:
+                self.inform("已经是最新的", "GitHub 上的最新版就是 \(AppInfo.runningVersion)。")
+            case .downloading(let version):
+                self.inform("正在下载 \(version)",
+                            "下好之后菜单里会多出「更新到 \(version)」，不在抓包的时候它会自己换上去。")
+            case .ready(let version):
+                self.inform("\(version) 已经下好了",
+                            "菜单里点「更新到 \(version)」立刻装，或者等不在抓包时它自己换。")
+            case .failed:
+                self.warn("没问到 GitHub", "网络不通或者接口出错了。过会儿再试，或者去项目主页看看。")
+            }
+        }
+    }
+
     @objc private func quit() { NSApp.terminate(nil) }
+
+    private func inform(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.addButton(withTitle: "好")
+        runModal(alert)
+    }
 
     private func warn(_ title: String, _ detail: String) {
         let alert = NSAlert()
@@ -478,6 +540,8 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             add(to: menu, title: "更新到 \(staged.version)（重启生效）", action: #selector(installUpdate))
         }
         menu.addItem(.separator())
+        // 版本号写在菜单项标题里 —— 想知道自己跑的是哪个版本，不该还要先点开一层
+        add(to: menu, title: "关于 AutoProxy \(AppInfo.runningVersion)", action: #selector(showAbout))
         add(to: menu, title: "退出", action: #selector(quit), key: "q")
     }
 
