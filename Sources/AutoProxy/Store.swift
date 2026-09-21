@@ -31,6 +31,25 @@ struct Store {
         }
     }
 
+    var autoUpdate: Bool {
+        get {
+            guard defaults.object(forKey: Key.autoUpdate) != nil else { return true }
+            return defaults.bool(forKey: Key.autoUpdate)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.autoUpdate)
+            defaults.synchronize()
+        }
+    }
+
+    var lastUpdateCheck: Date? {
+        get { defaults.object(forKey: Key.lastUpdateCheck) as? Date }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.lastUpdateCheck)
+            defaults.synchronize()
+        }
+    }
+
     /// 多设备同时在场时，被选中管理的那台。它不在场就退回当场的第一台。
     var activeSerial: String? {
         get { defaults.string(forKey: Key.activeSerial) }
@@ -77,6 +96,8 @@ struct Store {
         static let port = "proxyPort"
         static let autoReconnect = "autoReconnect"
         static let activeSerial = "activeSerial"
+        static let autoUpdate = "autoUpdate"
+        static let lastUpdateCheck = "lastUpdateCheck"
         static let startWarningAcknowledged = "startWarningAcknowledged"
         static let seen = "seenSerials"
         static func proxyOn(_ serial: String) -> String { "proxyOn.\(serial)" }

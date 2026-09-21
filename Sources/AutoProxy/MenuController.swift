@@ -3,6 +3,7 @@ import UniformTypeIdentifiers
 
 final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = Coordinator()
+    private lazy var updater = Updater(store: coordinator.store)
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let probeQueue = DispatchQueue(label: "me.ikvarxt.autoproxy.probe")
 
@@ -30,6 +31,12 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             monitor?.start()
         }
 
+        updater.start { [weak self] in
+            self?.renderedKey = ""
+            self?.installIfIdle()
+            self?.render()
+        }
+
         // 事件驱动管插拔，这条定时器只负责刷新链路细节（代理端退出、隧道被移除）
         timer = Timer.scheduledTimer(withTimeInterval: 3, repeats: true) { [weak self] _ in
             self?.refresh()
@@ -39,6 +46,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor?.stop()
+        updater.stop()
         // 这条不能挪到后台：异步派发出去，进程已经走完退出流程，手机上的代理就留着了
         if case .capturing(let device) = state { coordinator.stop(device) }
     }
@@ -64,6 +72,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.present = result.present
                 self.evictStrays(result.strays)
                 self.autoRecover(result)
+                self.installIfIdle()
                 guard !self.menuIsOpen, self.renderKey != self.renderedKey else { return }
                 self.render()
             }
@@ -270,6 +279,30 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
+    /// 换版本要重启进程，而退出会顺手清掉手机上的代理 —— 正抓着包的时候干这事等于掐断链路。
+    /// 所以下载好也先放着，等状态离开「代理中」那一刻再换。菜单里那一项是给等不及的人手动点的。
+    private func installIfIdle() {
+        guard updater.staged != nil, !menuIsOpen else { return }
+        if case .capturing = state { return }
+        installUpdate()
+    }
+
+    @objc private func installUpdate() {
+        guard let staged = updater.staged else { return }
+        do {
+            try Installer.scheduleSwap(newApp: staged.app, over: Bundle.main.bundleURL)
+            NSApp.terminate(nil)
+        } catch {
+            warn("更新失败", error.localizedDescription)
+        }
+    }
+
+    @objc private func toggleAutoUpdate() {
+        coordinator.store.autoUpdate = !coordinator.store.autoUpdate
+        renderedKey = ""
+        render()
+    }
+
     @objc private func quit() { NSApp.terminate(nil) }
 
     private func warn(_ title: String, _ detail: String) {
@@ -293,6 +326,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var renderKey: String {
         state.headline + "|" + present.map(\.serial).joined(separator: ",")
             + "|" + (coordinator.store.activeSerial ?? "")
+            + "|" + (updater.staged.map { "\($0.version)" } ?? "")
     }
 
     private func render() {
@@ -354,6 +388,15 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         auto.target = self
         auto.state = coordinator.store.autoReconnect ? .on : .off
         menu.addItem(auto)
+
+        let update = NSMenuItem(title: "每天检查更新", action: #selector(toggleAutoUpdate), keyEquivalent: "")
+        update.target = self
+        update.state = coordinator.store.autoUpdate ? .on : .off
+        menu.addItem(update)
+
+        if let staged = updater.staged {
+            add(to: menu, title: "更新到 \(staged.version)（重启生效）", action: #selector(installUpdate))
+        }
         menu.addItem(.separator())
         add(to: menu, title: "退出", action: #selector(quit), key: "q")
     }
