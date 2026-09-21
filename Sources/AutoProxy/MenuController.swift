@@ -136,7 +136,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         alert.informativeText = """
         开启后，\(device.label) 的系统代理会指向 127.0.0.1:\(coordinator.store.port)。
 
-        这个设置存在手机上：拔线不会自动消失，重启也不丢，而且手机的设置界面里没有任何入口可以改它。
+        这条设置写进手机自己的系统里：拔线不会自动消失，重启也不丢，而且手机的设置界面里没有任何入口可以改它。
 
         直接拔线的后果是手机信号满格、Wi-Fi 正常，但所有 App 都打不开网页 —— 流量全发向一个已经不存在的 USB 隧道。
 
