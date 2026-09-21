@@ -10,6 +10,11 @@ enum CertificateError: LocalizedError {
     }
 }
 
+struct ProbeResult {
+    let state: CaptureState
+    let recovery: RecoveryAction
+}
+
 /// 所有对设备的读写都经过这里。它不认识 AppKit，便于单测。
 final class Coordinator {
     let adb: Adb?
@@ -20,18 +25,21 @@ final class Coordinator {
         self.store = store
     }
 
-    func probe() -> CaptureState {
-        guard let adb else { return .adbMissing }
+    func probe() -> ProbeResult {
+        guard let adb else { return ProbeResult(state: .adbMissing, recovery: .none) }
 
         let port = store.port
         var snapshot = Snapshot(port: port, stale: store.stale())
 
         guard let device = adb.devices().first(where: { $0.state != "offline" }) else {
-            return CaptureState.derive(from: snapshot)
+            return ProbeResult(state: CaptureState.derive(from: snapshot), recovery: .none)
         }
         snapshot.device = device
 
         if device.isUsable {
+            // 必须赶在下面的 remember 之前读 —— 那句会把记录刷成本次实测值，
+            // 而「上次离开时开着没有」正是判断要不要自动接回去的唯一依据。
+            snapshot.wasCapturing = store.wasCapturing(serial: device.serial)
             snapshot.proxy = adb.proxy(device.serial)
             snapshot.hasTunnel = adb.hasReverse(device.serial, port: port)
             snapshot.portListening = ProxyProbe.isListening(port: port)
@@ -43,7 +51,21 @@ final class Coordinator {
             }
         }
 
-        return CaptureState.derive(from: snapshot)
+        return ProbeResult(state: CaptureState.derive(from: snapshot),
+                           recovery: CaptureState.recovery(from: snapshot))
+    }
+
+    /// 执行 `CaptureState.recovery` 给出的动作。做什么由那个纯函数决定，这里只负责落地。
+    func recover(_ action: RecoveryAction, device: Device) {
+        guard let adb else { return }
+        switch action {
+        case .none:
+            break
+        case .restoreLink:
+            start(device)
+        case .repairTunnel:
+            adb.addReverse(device.serial, port: store.port)
+        }
     }
 
     func start(_ device: Device) {

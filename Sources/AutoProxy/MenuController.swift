@@ -12,6 +12,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var renderedKey = ""
     private var menuIsOpen = false
     private var probing = false
+    private var lastRecovery: (serial: String, at: Date)?
 
     // MARK: - Lifecycle
 
@@ -54,14 +55,37 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         probing = true
         probeQueue.async { [weak self] in
             guard let self else { return }
-            let next = self.coordinator.probe()
+            let result = self.coordinator.probe()
             DispatchQueue.main.async {
                 self.probing = false
-                self.state = next
-                guard !self.menuIsOpen, next.headline != self.renderedKey else { return }
+                self.state = result.state
+                self.autoRecover(result)
+                guard !self.menuIsOpen, result.state.headline != self.renderedKey else { return }
                 self.render()
             }
         }
+    }
+
+    /// 同一台设备 20 秒内只自动动手一次。补隧道这种动作在链路真修不好时会被定时器
+    /// 反复触发，节流让它退化成低频重试，而不是每 3 秒对手机发一轮命令。
+    private func autoRecover(_ result: ProbeResult) {
+        guard coordinator.store.autoReconnect,
+              result.recovery != .none,
+              let device = result.state.device,
+              !recentlyRecovered(device.serial)
+        else { return }
+
+        lastRecovery = (device.serial, Date())
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            self.coordinator.recover(result.recovery, device: device)
+            DispatchQueue.main.async { self.refresh() }
+        }
+    }
+
+    private func recentlyRecovered(_ serial: String) -> Bool {
+        guard let last = lastRecovery, last.serial == serial else { return false }
+        return Date().timeIntervalSince(last.at) < 20
     }
 
     // MARK: - Actions
@@ -168,6 +192,14 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         refresh()
     }
 
+    @objc private func toggleAutoReconnect() {
+        coordinator.store.autoReconnect = !coordinator.store.autoReconnect
+        lastRecovery = nil
+        renderedKey = ""
+        refresh()
+        render()
+    }
+
     @objc private func quit() { NSApp.terminate(nil) }
 
     @discardableResult
@@ -218,6 +250,11 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             add(to: menu, title: "安装抓包证书…", action: #selector(installCertificate))
         }
         add(to: menu, title: "代理端口：\(coordinator.store.port)…", action: #selector(editPort))
+
+        let auto = NSMenuItem(title: "重新插上时自动接回", action: #selector(toggleAutoReconnect), keyEquivalent: "")
+        auto.target = self
+        auto.state = coordinator.store.autoReconnect ? .on : .off
+        menu.addItem(auto)
         menu.addItem(.separator())
         add(to: menu, title: "退出", action: #selector(quit), key: "q")
     }

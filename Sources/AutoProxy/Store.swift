@@ -20,6 +20,21 @@ struct Store {
         }
     }
 
+    var autoReconnect: Bool {
+        get {
+            guard defaults.object(forKey: Key.autoReconnect) != nil else { return true }
+            return defaults.bool(forKey: Key.autoReconnect)
+        }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.autoReconnect)
+            defaults.synchronize()
+        }
+    }
+
+    func wasCapturing(serial: String) -> Bool {
+        defaults.bool(forKey: Key.proxyOn(serial))
+    }
+
     func remember(device: Device, proxyOn: Bool, port: Int) {
         defaults.set(proxyOn, forKey: Key.proxyOn(device.serial))
         defaults.set(device.model, forKey: Key.model(device.serial))
@@ -43,6 +58,7 @@ struct Store {
 
     private enum Key {
         static let port = "proxyPort"
+        static let autoReconnect = "autoReconnect"
         static let seen = "seenSerials"
         static func proxyOn(_ serial: String) -> String { "proxyOn.\(serial)" }
         static func model(_ serial: String) -> String { "model.\(serial)" }

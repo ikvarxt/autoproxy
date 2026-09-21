@@ -13,6 +13,17 @@ struct Snapshot: Equatable {
     var portListening: Bool = false
     var port: Int = 9000
     var stale: StaleRecord?
+    /// 这台设备上一次离开时代理是开着的
+    var wasCapturing: Bool = false
+}
+
+/// 设备重新接入、或链路在原地断掉时，可以自己动手补回来的部分。
+enum RecoveryAction: Equatable {
+    case none
+    /// 隧道和代理都要重建 —— 拔线后重新插上就是这种
+    case restoreLink
+    /// 代理还在手机上，只是隧道没了（adb server 重启、reverse 被别的工具清掉）
+    case repairTunnel
 }
 
 enum CaptureState: Equatable {
@@ -65,6 +76,22 @@ enum CaptureState: Equatable {
 }
 
 extension CaptureState {
+    /// 自动重连的硬前提是本机端口有人监听。端口空着还去设代理，手机的 HTTP 流量
+    /// 会全部发向一个不存在的端口 —— 那比不重连糟得多，用户还会以为是手机坏了。
+    static func recovery(from s: Snapshot) -> RecoveryAction {
+        guard let device = s.device, device.isUsable, s.portListening else { return .none }
+
+        switch s.proxy {
+        case .unset:
+            return s.wasCapturing ? .restoreLink : .none
+        case .set(let value) where value == "127.0.0.1:\(s.port)":
+            return s.hasTunnel ? .none : .repairTunnel
+        case .set, .unreadable:
+            // 代理指向别处是别人设的，不替他做主
+            return .none
+        }
+    }
+
     var headline: String {
         switch self {
         case .adbMissing: return "找不到 adb"

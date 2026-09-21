@@ -50,4 +50,26 @@ final class StoreTests: XCTestCase {
 
         XCTAssertNil(store.stale())
     }
+
+    func testAutoReconnectIsOnUntilTurnedOff() {
+        let store = Store(defaults: defaults)
+        XCTAssertTrue(store.autoReconnect)
+
+        store.autoReconnect = false
+        XCTAssertFalse(Store(defaults: defaults).autoReconnect)
+
+        store.autoReconnect = true
+        XCTAssertTrue(Store(defaults: defaults).autoReconnect)
+    }
+
+    func testWasCapturingReadsBackWhatWasRemembered() {
+        let store = Store(defaults: defaults)
+        let phone = Device(serial: "R3CT10FAKE1", model: "SM_S9110", state: "device")
+
+        XCTAssertFalse(store.wasCapturing(serial: phone.serial))
+        store.remember(device: phone, proxyOn: true, port: 9000)
+        XCTAssertTrue(store.wasCapturing(serial: phone.serial))
+        store.remember(device: phone, proxyOn: false, port: 9000)
+        XCTAssertFalse(store.wasCapturing(serial: phone.serial))
+    }
 }
