@@ -13,6 +13,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuIsOpen = false
     private var probing = false
     private var lastRecovery: (serial: String, at: Date)?
+    private var present: [Device] = []
 
     // MARK: - Lifecycle
 
@@ -59,8 +60,10 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             DispatchQueue.main.async {
                 self.probing = false
                 self.state = result.state
+                self.present = result.present
+                self.evictStrays(result.strays)
                 self.autoRecover(result)
-                guard !self.menuIsOpen, result.state.headline != self.renderedKey else { return }
+                guard !self.menuIsOpen, self.renderKey != self.renderedKey else { return }
                 self.render()
             }
         }
@@ -83,6 +86,17 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
     }
 
+    /// 切换活跃设备后，旧的那台还挂着我们的代理。它已经从菜单的操作范围里出去了，
+    /// 留着不管，等于给人埋一台拔走就上不了网的手机。
+    private func evictStrays(_ strays: [Device]) {
+        guard !strays.isEmpty else { return }
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            self.coordinator.evict(strays)
+            DispatchQueue.main.async { self.refresh() }
+        }
+    }
+
     private func recentlyRecovered(_ serial: String) -> Bool {
         guard let last = lastRecovery, last.serial == serial else { return false }
         return Date().timeIntervalSince(last.at) < 20
@@ -92,11 +106,52 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func toggleCapture() {
         switch state {
-        case .ready(let device, _): coordinator.start(device)
+        case .ready(let device, _):
+            guard confirmStart(device) else { return }
+            coordinator.start(device)
         case .capturing(let device), .brokenLink(let device, _): coordinator.stop(device)
         default: return
         }
         refresh()
+    }
+
+    @objc private func selectDevice(_ sender: NSMenuItem) {
+        guard let serial = sender.representedObject as? String,
+              serial != coordinator.store.activeSerial
+        else { return }
+        // 旧设备的代理不在这里清 —— 下一次 probe 会把它认成 stray，走同一条清理路径
+        coordinator.store.activeSerial = serial
+        lastRecovery = nil
+        renderedKey = ""
+        refresh()
+    }
+
+    /// 开代理这件事的后果全在手机那边，而且拔线不会自动消失。首次开启前必须说清楚，
+    /// 勾了「不再提示」就不再拦 —— 知道一次就够了，每次都弹只是噪音。
+    private func confirmStart(_ device: Device) -> Bool {
+        guard !coordinator.store.startWarningAcknowledged else { return true }
+
+        let alert = NSAlert()
+        alert.messageText = "用完要手动停止，别直接拔线"
+        alert.informativeText = """
+        开启后，\(device.label) 的系统代理会指向 127.0.0.1:\(coordinator.store.port)。
+
+        这个设置存在手机上：拔线不会自动消失，重启也不丢，而且手机的设置界面里没有任何入口可以改它。
+
+        直接拔线的后果是手机信号满格、Wi-Fi 正常，但所有 App 都打不开网页 —— 流量全发向一个已经不存在的 USB 隧道。
+
+        用完在菜单里点「停止代理」；手机还插着时退出本工具，也会自动清理。
+        """
+
+        let acknowledged = NSButton(checkboxWithTitle: "我知道了，不用再提示", target: nil, action: nil)
+        acknowledged.sizeToFit()
+        alert.accessoryView = acknowledged
+        alert.addButton(withTitle: "开启代理")
+        alert.addButton(withTitle: "取消")
+
+        guard runModal(alert) == .alertFirstButtonReturn else { return false }
+        if acknowledged.state == .on { coordinator.store.startWarningAcknowledged = true }
+        return true
     }
 
     @objc private func showStrandedHelp() {
@@ -104,7 +159,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         let alert = NSAlert()
         alert.messageText = "\(model) 现在可能上不了网"
         alert.informativeText = """
-        上次抓包结束时，它的系统代理仍指向 127.0.0.1:\(port)。
+        上次离开时，它的系统代理仍指向 127.0.0.1:\(port)。
 
         USB 线一拔，隧道就消失了，手机所有 HTTP 流量会发向一个不存在的端口 —— 表现为信号满格、Wi-Fi 正常，但什么网页都打不开。
 
@@ -124,7 +179,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let device = state.device else { return }
 
         let panel = NSOpenPanel()
-        panel.message = "选择抓包软件的根证书"
+        panel.message = "选择代理软件的根证书"
         panel.allowsMultipleSelection = false
         panel.allowedContentTypes = ["crt", "cer", "pem", "der"].compactMap { UTType(filenameExtension: $0) }
         if let directory = ProxyProbe.reqableCertificateDirectory {
@@ -210,8 +265,14 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     // MARK: - Rendering
 
+    /// 状态行之外，设备列表和选中项的变化也要让菜单重画
+    private var renderKey: String {
+        state.headline + "|" + present.map(\.serial).joined(separator: ",")
+            + "|" + (coordinator.store.activeSerial ?? "")
+    }
+
     private func render() {
-        renderedKey = state.headline
+        renderedKey = renderKey
         statusItem.button?.image = StatusIcon.image(for: state.icon)
         statusItem.button?.toolTip = state.headline
 
@@ -222,6 +283,20 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         headline.isEnabled = false
         menu.addItem(headline)
 
+        if present.count > 1 {
+            menu.addItem(.separator())
+            let hint = NSMenuItem(title: "只管一台，其余自动清理", action: nil, keyEquivalent: "")
+            hint.isEnabled = false
+            menu.addItem(hint)
+            for device in present {
+                let item = NSMenuItem(title: device.label, action: #selector(selectDevice(_:)), keyEquivalent: "")
+                item.target = self
+                item.representedObject = device.serial
+                item.state = device.serial == coordinator.store.activeSerial ? .on : .off
+                menu.addItem(item)
+            }
+        }
+
         if case .offlineStranded = state {
             add(to: menu, title: "查看问题与解决方案…", action: #selector(showStrandedHelp))
         }
@@ -229,9 +304,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
         switch state {
         case .ready:
-            add(to: menu, title: "开启抓包", action: #selector(toggleCapture))
+            add(to: menu, title: "开启代理", action: #selector(toggleCapture))
         case .capturing:
-            add(to: menu, title: "停止抓包", action: #selector(toggleCapture))
+            add(to: menu, title: "停止代理", action: #selector(toggleCapture))
         case .brokenLink:
             add(to: menu, title: "清理手机代理", action: #selector(toggleCapture))
         case .unauthorized:
@@ -247,7 +322,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         }
 
         if state.device != nil {
-            add(to: menu, title: "安装抓包证书…", action: #selector(installCertificate))
+            add(to: menu, title: "安装代理证书…", action: #selector(installCertificate))
         }
         add(to: menu, title: "代理端口：\(coordinator.store.port)…", action: #selector(editPort))
 

@@ -99,7 +99,7 @@ extension CaptureState {
         case .offlineStranded(let model, let port): return "\(model) 可能上不了网（代理 :\(port) 未清理）"
         case .unauthorized(let d): return "\(d.label) 未授权调试"
         case .ready(let d, let listening): return listening ? "就绪 · \(d.label)" : "就绪 · \(d.label)（端口无监听）"
-        case .capturing(let d): return "抓包中 · \(d.label)"
+        case .capturing(let d): return "代理中 · \(d.label)"
         case .brokenLink(let d, let reason): return "\(d.label) 已断网 · \(reason)"
         }
     }

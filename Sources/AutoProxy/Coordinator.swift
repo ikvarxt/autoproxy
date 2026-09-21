@@ -13,6 +13,10 @@ enum CertificateError: LocalizedError {
 struct ProbeResult {
     let state: CaptureState
     let recovery: RecoveryAction
+    /// 当场所有非 offline 的设备，菜单据此给出选择项
+    var present: [Device] = []
+    /// 不是活跃设备，却还挂着我们这个端口的代理 —— 该清掉
+    var strays: [Device] = []
 }
 
 /// 所有对设备的读写都经过这里。它不认识 AppKit，便于单测。
@@ -31,9 +35,11 @@ final class Coordinator {
         let port = store.port
         var snapshot = Snapshot(port: port, stale: store.stale())
 
-        guard let device = adb.devices().first(where: { $0.state != "offline" }) else {
+        let present = adb.devices().filter { $0.state != "offline" }
+        guard let device = Coordinator.pick(from: present, active: store.activeSerial) else {
             return ProbeResult(state: CaptureState.derive(from: snapshot), recovery: .none)
         }
+        if store.activeSerial != device.serial { store.activeSerial = device.serial }
         snapshot.device = device
 
         if device.isUsable {
@@ -52,7 +58,28 @@ final class Coordinator {
         }
 
         return ProbeResult(state: CaptureState.derive(from: snapshot),
-                           recovery: CaptureState.recovery(from: snapshot))
+                           recovery: CaptureState.recovery(from: snapshot),
+                           present: present,
+                           strays: strays(besides: device, among: present, port: port))
+    }
+
+    /// 记住的那台优先。它不在场（或还没选过）就退回当场第一台，由调用方把记录改过去。
+    static func pick(from devices: [Device], active: String?) -> Device? {
+        if let active, let match = devices.first(where: { $0.serial == active }) { return match }
+        return devices.first
+    }
+
+    /// 只认指向本机这个端口的代理。指向别处的是别人设的，不替他做主 —— 与自动重连同一条原则。
+    private func strays(besides active: Device, among devices: [Device], port: Int) -> [Device] {
+        guard devices.count > 1, let adb else { return [] }
+        return devices.filter { $0.serial != active.serial && $0.isUsable }
+            .filter { adb.proxy($0.serial) == .set("127.0.0.1:\(port)") }
+    }
+
+    /// 同一时刻只让一台手机挂着我们的代理。切走之后那台仍指着本机端口，而菜单里已经
+    /// 看不到它了 —— 不清掉，它被拔走就是一台上不了网、还没人知道为什么的手机。
+    func evict(_ devices: [Device]) {
+        for device in devices { stop(device) }
     }
 
     /// 执行 `CaptureState.recovery` 给出的动作。做什么由那个纯函数决定，这里只负责落地。
@@ -87,7 +114,7 @@ final class Coordinator {
         store.remember(device: device, proxyOn: false, port: port)
     }
 
-    /// 换端口。正在抓包就把链路整条迁过去 —— 只改配置会把手机留在指向旧端口的断网状态。
+    /// 换端口。正在代理就把链路整条迁过去 —— 只改配置会把手机留在指向旧端口的断网状态。
     func changePort(to port: Int, device: Device?, wasCapturing: Bool) {
         if let device { stop(device, port: store.port) }
         store.port = port

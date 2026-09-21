@@ -31,6 +31,23 @@ struct Store {
         }
     }
 
+    /// 多设备同时在场时，被选中管理的那台。它不在场就退回当场的第一台。
+    var activeSerial: String? {
+        get { defaults.string(forKey: Key.activeSerial) }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.activeSerial)
+            defaults.synchronize()
+        }
+    }
+
+    var startWarningAcknowledged: Bool {
+        get { defaults.bool(forKey: Key.startWarningAcknowledged) }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.startWarningAcknowledged)
+            defaults.synchronize()
+        }
+    }
+
     func wasCapturing(serial: String) -> Bool {
         defaults.bool(forKey: Key.proxyOn(serial))
     }
@@ -59,6 +76,8 @@ struct Store {
     private enum Key {
         static let port = "proxyPort"
         static let autoReconnect = "autoReconnect"
+        static let activeSerial = "activeSerial"
+        static let startWarningAcknowledged = "startWarningAcknowledged"
         static let seen = "seenSerials"
         static func proxyOn(_ serial: String) -> String { "proxyOn.\(serial)" }
         static func model(_ serial: String) -> String { "model.\(serial)" }

@@ -50,7 +50,7 @@ BUILT="$REPO/build/$APP_NAME.app"
 codesign --verify --deep "$BUILT" 2>/dev/null || fail "签名校验没过"
 
 # 用 SIGTERM 而不是优雅退出：优雅退出会顺手清掉手机代理，
-# 等于每次部署都把正在进行的抓包给停了。直接杀掉，隧道和代理原样留着，
+# 等于每次部署都把正在进行的代理给停了。直接杀掉，隧道和代理原样留着，
 # 新实例起来探测到什么就接着管什么。
 if pgrep -x "$APP_NAME" >/dev/null; then
     step "停掉在跑的实例（保留手机上的链路）"
