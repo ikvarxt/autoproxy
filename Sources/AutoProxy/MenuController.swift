@@ -39,6 +39,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     func applicationWillTerminate(_ notification: Notification) {
         monitor?.stop()
+        // 这条不能挪到后台：异步派发出去，进程已经走完退出流程，手机上的代理就留着了
         if case .capturing(let device) = state { coordinator.stop(device) }
     }
 
@@ -108,11 +109,20 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         switch state {
         case .ready(let device, _):
             guard confirmStart(device) else { return }
-            coordinator.start(device)
-        case .capturing(let device), .brokenLink(let device, _): coordinator.stop(device)
+            perform { self.coordinator.start(device) }
+        case .capturing(let device), .brokenLink(let device, _):
+            perform { self.coordinator.stop(device) }
         default: return
         }
-        refresh()
+    }
+
+    /// 凡是会跑 adb 的动作都走这里。正常 10ms 无所谓，但设备半死不活时 Shell 会等满
+    /// 超时上限，那段时间里主线程要是在等，整个菜单栏（不止本 app）都会僵住。
+    private func perform(_ work: @escaping () -> Void) {
+        probeQueue.async { [weak self] in
+            work()
+            DispatchQueue.main.async { self?.refresh() }
+        }
     }
 
     @objc private func selectDevice(_ sender: NSMenuItem) {
@@ -192,24 +202,31 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         NSApp.activate(ignoringOtherApps: true)
         guard panel.runModal() == .OK, let url = panel.url else { return }
 
-        do {
-            let name = try coordinator.installCertificate(localPath: url.path, on: device)
-            let alert = NSAlert()
-            alert.messageText = "证书已推送到 \(device.label)"
-            alert.informativeText = """
-            手机上已打开「从设备存储空间安装」。接下来要你在手机上点三下：
-
-            1. CA 证书
-            2. 在文件列表里选 \(name)
-            3. 确定（可能要求输入锁屏密码）
-
-            这三步省不掉。由 adb 发起的 CA 安装会被系统直接拒绝（「必须在设置中安装来自 Shell 的此证书」），只有用户在设置里亲自确认才作数。
-            """
-            alert.addButton(withTitle: "好")
-            runModal(alert)
-        } catch {
-            warn("推送证书失败", error.localizedDescription)
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            do {
+                let name = try self.coordinator.installCertificate(localPath: url.path, on: device)
+                DispatchQueue.main.async { self.certificatePushed(name: name, on: device) }
+            } catch {
+                DispatchQueue.main.async { self.warn("推送证书失败", error.localizedDescription) }
+            }
         }
+    }
+
+    private func certificatePushed(name: String, on device: Device) {
+        let alert = NSAlert()
+        alert.messageText = "证书已推送到 \(device.label)"
+        alert.informativeText = """
+        手机上已打开「从设备存储空间安装」。接下来要你在手机上点三下：
+
+        1. CA 证书
+        2. 在文件列表里选 \(name)
+        3. 确定（可能要求输入锁屏密码）
+
+        这三步省不掉。由 adb 发起的 CA 安装会被系统直接拒绝（「必须在设置中安装来自 Shell 的此证书」），只有用户在设置里亲自确认才作数。
+        """
+        alert.addButton(withTitle: "好")
+        runModal(alert)
     }
 
     @objc private func editPort() {
@@ -240,9 +257,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard port != coordinator.store.port else { return }
         var capturing = false
         if case .capturing = state { capturing = true }
-        coordinator.changePort(to: port, device: state.device, wasCapturing: capturing)
+        let device = state.device
         renderedKey = ""
-        refresh()
+        perform { self.coordinator.changePort(to: port, device: device, wasCapturing: capturing) }
     }
 
     @objc private func toggleAutoReconnect() {
