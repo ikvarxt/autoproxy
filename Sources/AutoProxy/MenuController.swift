@@ -14,6 +14,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var probing = false
     private var lastRecovery: (serial: String, at: Date)?
     private var present: [Device] = []
+    private var handoff: String?
 
     // MARK: - Lifecycle
 
@@ -62,6 +63,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.state = result.state
                 self.present = result.present
                 self.evictStrays(result.strays)
+                self.applyHandoff(result)
                 self.autoRecover(result)
                 guard !self.menuIsOpen, self.renderKey != self.renderedKey else { return }
                 self.render()
@@ -82,6 +84,22 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         probeQueue.async { [weak self] in
             guard let self else { return }
             self.coordinator.recover(result.recovery, device: device)
+            DispatchQueue.main.async { self.refresh() }
+        }
+    }
+
+    /// 代理状态跟着人走：切换前开着，切换后新设备上原样开起来。切换的意图本来就是
+    /// 「换台手机接着来」，让人再点一次开启是多余的。只试一次，接不上就当没这回事。
+    private func applyHandoff(_ result: ProbeResult) {
+        guard let target = handoff else { return }
+        handoff = nil
+        guard case .ready(let device, let listening) = result.state,
+              device.serial == target, listening
+        else { return }
+
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            self.coordinator.start(device)
             DispatchQueue.main.async { self.refresh() }
         }
     }
@@ -119,6 +137,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let serial = sender.representedObject as? String,
               serial != coordinator.store.activeSerial
         else { return }
+        if case .capturing = state { handoff = serial }
         // 旧设备的代理不在这里清 —— 下一次 probe 会把它认成 stray，走同一条清理路径
         coordinator.store.activeSerial = serial
         lastRecovery = nil
