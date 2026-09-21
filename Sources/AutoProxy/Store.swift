@@ -50,6 +50,14 @@ struct Store {
         }
     }
 
+    var relocationDeclined: Bool {
+        get { defaults.bool(forKey: Key.relocationDeclined) }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.relocationDeclined)
+            defaults.synchronize()
+        }
+    }
+
     /// 多设备同时在场时，被选中管理的那台。它不在场就退回当场的第一台。
     var activeSerial: String? {
         get { defaults.string(forKey: Key.activeSerial) }
@@ -98,6 +106,7 @@ struct Store {
         static let activeSerial = "activeSerial"
         static let autoUpdate = "autoUpdate"
         static let lastUpdateCheck = "lastUpdateCheck"
+        static let relocationDeclined = "relocationDeclined"
         static let startWarningAcknowledged = "startWarningAcknowledged"
         static let seen = "seenSerials"
         static func proxyOn(_ serial: String) -> String { "proxyOn.\(serial)" }

@@ -4,6 +4,7 @@ import UniformTypeIdentifiers
 final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = Coordinator()
     private lazy var updater = Updater(store: coordinator.store)
+    private let notifier = Notifier()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let probeQueue = DispatchQueue(label: "me.ikvarxt.autoproxy.probe")
 
@@ -14,6 +15,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var menuIsOpen = false
     private var probing = false
     private var lastRecovery: (serial: String, at: Date)?
+    private var stranded = StrandedAlerter()
     private var present: [Device] = []
 
     // MARK: - Lifecycle
@@ -31,6 +33,10 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             monitor?.start()
         }
 
+        notifier.onOpen = { [weak self] in self?.showStrandedHelp() }
+        notifier.fallback = { [weak self] title, body in self?.warn(title, body) }
+        notifier.start()
+
         updater.start { [weak self] in
             self?.renderedKey = ""
             self?.installIfIdle()
@@ -42,6 +48,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             self?.refresh()
         }
         refresh()
+        DispatchQueue.main.async { [weak self] in self?.promptRelocationIfNeeded() }
     }
 
     func applicationWillTerminate(_ notification: Notification) {
@@ -72,6 +79,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.present = result.present
                 self.evictStrays(result.strays)
                 self.autoRecover(result)
+                self.announceStranded()
                 self.installIfIdle()
                 guard !self.menuIsOpen, self.renderKey != self.renderedKey else { return }
                 self.render()
@@ -176,6 +184,17 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         return true
     }
 
+    /// 拔线时手机上的代理还开着 —— 那台手机此刻是上不了网的，而人多半已经走了。
+    /// 这件事不能只写在菜单里等人来看，得推到通知中心去。
+    private func announceStranded() {
+        guard let record = stranded.announce(state) else { return }
+        notifier.post(
+            title: "\(record.model) 现在上不了网",
+            body: "线拔了，但代理设置还留在手机上指着 127.0.0.1:\(record.port)。"
+                + "手机上没有入口能关掉它，重启也不管用 —— 插回这台 Mac，点「停止代理」才能恢复。"
+        )
+    }
+
     @objc private func showStrandedHelp() {
         guard case .offlineStranded(let model, let port) = state else { return }
         let alert = NSAlert()
@@ -195,6 +214,60 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         """
         alert.addButton(withTitle: "知道了")
         runModal(alert)
+    }
+
+    /// 自我更新要把新版本搬到自己头上，可从 zip 里直接双击运行时，系统给的是一份隔离过的
+    /// 只读副本 —— 那儿谁也搬不动，自动更新会一路静默失败到用户以为它坏了。所以这一提示
+    /// 在只读位置上不受「不再提示」约束：那不是偏好问题，是功能在那儿根本不成立。
+    private func promptRelocationIfNeeded() {
+        let location = InstallLocation.classify(bundle: Bundle.main.bundleURL)
+        guard location.needsRelocation else { return }
+        guard location == .readOnly || !coordinator.store.relocationDeclined else { return }
+
+        let alert = NSAlert()
+        alert.messageText = "把 AutoProxy 放进「应用程序」文件夹"
+        alert.informativeText = location == .readOnly
+            ? """
+              现在运行的是系统生成的一份只读副本。程序能用，但自动更新装不上去，每次还得重新去找这个文件。
+
+              放进「应用程序」文件夹就都解决了。
+              """
+            : """
+              现在它在「\(Bundle.main.bundleURL.deletingLastPathComponent().lastPathComponent)」里跑。
+
+              放进「应用程序」文件夹，自动更新和登录启动才有个固定的落点。
+              """
+
+        var remember: NSButton?
+        if location == .loose {
+            let box = NSButton(checkboxWithTitle: "不用再提示", target: nil, action: nil)
+            box.sizeToFit()
+            alert.accessoryView = box
+            remember = box
+        }
+
+        alert.addButton(withTitle: "帮我移过去")
+        alert.addButton(withTitle: "我自己拖")
+        alert.addButton(withTitle: "以后再说")
+
+        switch runModal(alert) {
+        case .alertFirstButtonReturn:
+            relocate(from: location)
+        case .alertSecondButtonReturn:
+            NSWorkspace.shared.activateFileViewerSelecting([Bundle.main.bundleURL])
+            NSWorkspace.shared.open(URL(fileURLWithPath: "/Applications"))
+        default:
+            if remember?.state == .on { coordinator.store.relocationDeclined = true }
+        }
+    }
+
+    private func relocate(from location: InstallLocation) {
+        do {
+            try Installer.relocateToApplications(at: location)
+            handOff()
+        } catch {
+            warn("移动失败", "\(error.localizedDescription)\n\n可以手动把它拖进「应用程序」文件夹。")
+        }
     }
 
     @objc private func installCertificate() {
@@ -279,8 +352,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         render()
     }
 
-    /// 换版本要重启进程，而退出会顺手清掉手机上的代理 —— 正抓着包的时候干这事等于掐断链路。
-    /// 所以下载好也先放着，等状态离开「代理中」那一刻再换。菜单里那一项是给等不及的人手动点的。
+    /// 链路本身扛得住重启 —— 隧道归 adb server 管，代理设置在手机上，两样都不随本进程走。
+    /// 但换版本那几秒没人盯着：这时候拔线不会被记录，断链也没人补。所以下载好先放着，
+    /// 等状态离开「代理中」再换。菜单里那一项是给等不及的人手动点的。
     private func installIfIdle() {
         guard updater.staged != nil, !menuIsOpen else { return }
         if case .capturing = state { return }
@@ -291,10 +365,16 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         guard let staged = updater.staged else { return }
         do {
             try Installer.scheduleSwap(newApp: staged.app, over: Bundle.main.bundleURL)
-            NSApp.terminate(nil)
+            handOff()
         } catch {
             warn("更新失败", error.localizedDescription)
         }
+    }
+
+    /// 换版本、换位置都要退出让位，但不能走正常退出 —— 那条路会顺手清掉手机上的代理，
+    /// 而几秒后新实例就起来接着管了。链路原样留着，接上就是。
+    private func handOff() -> Never {
+        exit(0)
     }
 
     @objc private func toggleAutoUpdate() {

@@ -74,7 +74,7 @@ enum ReleaseFeed {
 }
 
 /// 每天问一次 GitHub 有没有新版本，有就下回来放着。**什么时候装由调用方决定** ——
-/// 装一次要重启进程，而退出时会清掉手机上的代理，正抓着包的时候干这事等于掐断链路。
+/// 装一次要重启进程，而重启那几秒没人盯着链路。
 final class Updater {
     /// 下载解压完、等着换上去的那个版本。
     /// 它和 busy 都只在主线程读写 —— 菜单那边也要读 staged，两头都待在主线程就不用上锁。
@@ -197,12 +197,35 @@ enum Installer {
         return app
     }
 
+    /// 把自己搬进应用程序文件夹，搬完重新拉起来。
+    ///
+    /// 只读位置（磁盘映像、系统给隔离包生成的临时副本）上搬不动源，所以一律先拷一份再放过去；
+    /// 源本来就能写的，连原地那份一起清掉 —— 留着只会让人下次双击到旧的那个。
+    @discardableResult
+    static func relocateToApplications(from bundle: URL = Bundle.main.bundleURL,
+                                       at location: InstallLocation,
+                                       waitFor pid: Int32 = ProcessInfo.processInfo.processIdentifier) throws -> URL {
+        let dest = URL(fileURLWithPath: "/Applications").appendingPathComponent(bundle.lastPathComponent)
+        let staging = FileManager.default.temporaryDirectory.appendingPathComponent("autoproxy-relocate")
+        try? FileManager.default.removeItem(at: staging)
+        try FileManager.default.createDirectory(at: staging, withIntermediateDirectories: true)
+
+        let copy = staging.appendingPathComponent(bundle.lastPathComponent)
+        let result = Shell.run("/usr/bin/ditto", [bundle.path, copy.path], timeout: 120)
+        guard result.ok else { throw UpdateError.swapFailed(result.trimmed) }
+
+        try scheduleSwap(newApp: copy, over: dest,
+                         removing: location == .loose ? bundle : nil, waitFor: pid)
+        return dest
+    }
+
     /// 排一段脚本，等本进程退出后把新版本换上去再拉起来。
     ///
     /// 自我替换有个硬约束：进程活着的时候动不了自己的 bundle，所以搬运只能交给外部进程。
     /// 三步搬运（旧的挪走 → 新的就位 → 删旧的）里任何一步失败都还能退回旧版本；
     /// 写成「先删后拷」的话，拷贝一失败机器上就没有这个 app 了。
     static func scheduleSwap(newApp: URL, over bundle: URL,
+                             removing source: URL? = nil,
                              waitFor pid: Int32 = ProcessInfo.processInfo.processIdentifier) throws {
         // 等待有上限：PID 可能被系统复用，无限等下去这次更新就永远搬不成。
         // 超时硬搬也是安全的 —— macOS 允许移动正在运行的 bundle，旧进程继续用已打开的 inode。
@@ -214,9 +237,14 @@ enum Installer {
           i=$((i + 1))
         done
         rm -rf "$BACKUP"
-        mv "$DEST" "$BACKUP" || exit 1
-        mv "$NEW" "$DEST" || { mv "$BACKUP" "$DEST"; exit 1; }
+        if [ -e "$DEST" ]; then
+          mv "$DEST" "$BACKUP" || exit 1
+        fi
+        mv "$NEW" "$DEST" || { [ -e "$BACKUP" ] && mv "$BACKUP" "$DEST"; exit 1; }
         rm -rf "$BACKUP"
+        if [ -n "$SOURCE" ] && [ "$SOURCE" != "$DEST" ]; then
+          rm -rf "$SOURCE"
+        fi
         xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
         open "$DEST"
         """
@@ -233,6 +261,7 @@ enum Installer {
             "NEW": newApp.path,
             "DEST": bundle.path,
             "BACKUP": bundle.path + ".old",
+            "SOURCE": source?.path ?? "",
         ]
 
         do {
