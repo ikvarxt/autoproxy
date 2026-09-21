@@ -54,3 +54,47 @@ final class ActiveDeviceStoreTests: XCTestCase {
         XCTAssertTrue(Store(defaults: defaults).startWarningAcknowledged, "勾过一次就不该再提示")
     }
 }
+
+final class SwitchTests: XCTestCase {
+    private var suite: String!
+    private var store: Store!
+    private var coordinator: Coordinator!
+
+    override func setUp() {
+        super.setUp()
+        suite = "autoproxy.tests.\(UUID().uuidString)"
+        store = Store(defaults: UserDefaults(suiteName: suite)!)
+        coordinator = Coordinator(adb: nil, store: store)
+    }
+
+    override func tearDown() {
+        UserDefaults().removePersistentDomain(forName: suite)
+        super.tearDown()
+    }
+
+    func testSwitchingWithoutAnOpenProxyJustMovesTheSelection() {
+        let target = Device(serial: "B2", model: "Pixel_8", state: "device")
+        XCTAssertNil(coordinator.switchTo(target, carryProxy: false))
+        XCTAssertEqual(store.activeSerial, "B2")
+    }
+
+    func testUnauthorizedTargetIsReported() {
+        let target = Device(serial: "B2", model: "Pixel_8", state: "unauthorized")
+        let problem = coordinator.switchTo(target, carryProxy: true)
+        XCTAssertNotNil(problem)
+        XCTAssertTrue(problem?.contains("Pixel 8") == true, "提示里要说清是哪台")
+    }
+
+    func testProxyDoesNotFollowWhenNobodyIsListening() {
+        store.port = 54_321  // 没人监听的端口：设过去等于把手机流量导进黑洞
+        let target = Device(serial: "B2", model: "Pixel_8", state: "device")
+        XCTAssertNotNil(coordinator.switchTo(target, carryProxy: true))
+    }
+
+    func testSelectionMovesEvenWhenTheProxyCannotFollow() {
+        store.port = 54_321
+        let target = Device(serial: "B2", model: "Pixel_8", state: "device")
+        _ = coordinator.switchTo(target, carryProxy: true)
+        XCTAssertEqual(store.activeSerial, "B2", "代理没跟过来，但人确实是要切的")
+    }
+}

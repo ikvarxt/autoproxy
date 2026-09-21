@@ -76,6 +76,21 @@ final class Coordinator {
             .filter { adb.proxy($0.serial) == .set("127.0.0.1:\(port)") }
     }
 
+    /// 切到另一台。代理状态跟着人走 —— 切换的意图就是「换台手机接着来」。
+    /// 返回非 nil 表示新设备没接上，由调用方告诉用户；旧的那台交给 stray 清理。
+    func switchTo(_ target: Device, carryProxy: Bool) -> String? {
+        store.activeSerial = target.serial
+        guard carryProxy else { return nil }
+
+        guard target.isUsable else { return "\(target.label) 还没授权 USB 调试。" }
+        guard ProxyProbe.isListening(port: store.port) else {
+            // 端口空着还设代理，手机的流量会全发向一个不存在的端口，比不切糟得多
+            return "本机 \(store.port) 端口没人监听，先打开代理软件。"
+        }
+        start(target)
+        return nil
+    }
+
     /// 同一时刻只让一台手机挂着我们的代理。切走之后那台仍指着本机端口，而菜单里已经
     /// 看不到它了 —— 不清掉，它被拔走就是一台上不了网、还没人知道为什么的手机。
     func evict(_ devices: [Device]) {

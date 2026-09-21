@@ -14,7 +14,6 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private var probing = false
     private var lastRecovery: (serial: String, at: Date)?
     private var present: [Device] = []
-    private var handoff: String?
 
     // MARK: - Lifecycle
 
@@ -63,7 +62,6 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
                 self.state = result.state
                 self.present = result.present
                 self.evictStrays(result.strays)
-                self.applyHandoff(result)
                 self.autoRecover(result)
                 guard !self.menuIsOpen, self.renderKey != self.renderedKey else { return }
                 self.render()
@@ -84,22 +82,6 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         probeQueue.async { [weak self] in
             guard let self else { return }
             self.coordinator.recover(result.recovery, device: device)
-            DispatchQueue.main.async { self.refresh() }
-        }
-    }
-
-    /// 代理状态跟着人走：切换前开着，切换后新设备上原样开起来。切换的意图本来就是
-    /// 「换台手机接着来」，让人再点一次开启是多余的。只试一次，接不上就当没这回事。
-    private func applyHandoff(_ result: ProbeResult) {
-        guard let target = handoff else { return }
-        handoff = nil
-        guard case .ready(let device, let listening) = result.state,
-              device.serial == target, listening
-        else { return }
-
-        probeQueue.async { [weak self] in
-            guard let self else { return }
-            self.coordinator.start(device)
             DispatchQueue.main.async { self.refresh() }
         }
     }
@@ -135,14 +117,23 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
 
     @objc private func selectDevice(_ sender: NSMenuItem) {
         guard let serial = sender.representedObject as? String,
-              serial != coordinator.store.activeSerial
+              serial != coordinator.store.activeSerial,
+              let target = present.first(where: { $0.serial == serial })
         else { return }
-        if case .capturing = state { handoff = serial }
-        // 旧设备的代理不在这里清 —— 下一次 probe 会把它认成 stray，走同一条清理路径
-        coordinator.store.activeSerial = serial
+
+        var carryProxy = false
+        if case .capturing = state { carryProxy = true }
         lastRecovery = nil
         renderedKey = ""
-        refresh()
+
+        probeQueue.async { [weak self] in
+            guard let self else { return }
+            let problem = self.coordinator.switchTo(target, carryProxy: carryProxy)
+            DispatchQueue.main.async {
+                if let problem { self.warn("代理没能跟着切过来", problem) }
+                self.refresh()
+            }
+        }
     }
 
     /// 开代理这件事的后果全在手机那边，而且拔线不会自动消失。首次开启前必须说清楚，
@@ -217,12 +208,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             alert.addButton(withTitle: "好")
             runModal(alert)
         } catch {
-            let alert = NSAlert()
-            alert.messageText = "推送证书失败"
-            alert.informativeText = error.localizedDescription
-            alert.alertStyle = .warning
-            alert.addButton(withTitle: "好")
-            runModal(alert)
+            warn("推送证书失败", error.localizedDescription)
         }
     }
 
@@ -268,6 +254,15 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     }
 
     @objc private func quit() { NSApp.terminate(nil) }
+
+    private func warn(_ title: String, _ detail: String) {
+        let alert = NSAlert()
+        alert.messageText = title
+        alert.informativeText = detail
+        alert.alertStyle = .warning
+        alert.addButton(withTitle: "好")
+        runModal(alert)
+    }
 
     @discardableResult
     private func runModal(_ alert: NSAlert) -> NSApplication.ModalResponse {
