@@ -6,6 +6,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private lazy var updater = Updater(store: coordinator.store)
     private let notifier = Notifier()
     private let mirror = Mirror()
+    private var sigterm: DispatchSourceSignal?
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let probeQueue = DispatchQueue(label: "me.ikvarxt.autoproxy.probe")
 
@@ -33,6 +34,18 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             }
             monitor?.start()
         }
+
+        // pkill 和 launchctl bootout 发的是 SIGTERM，默认行为是当场死掉 ——
+        // scrcpy 就留在那儿成了孤儿。收掉它之后直接 exit，不走 applicationWillTerminate：
+        // 手机上的代理原样留着，那正是部署脚本用 SIGTERM 而不是优雅退出想要的。
+        signal(SIGTERM, SIG_IGN)
+        let dying = DispatchSource.makeSignalSource(signal: SIGTERM, queue: .main)
+        dying.setEventHandler { [weak self] in
+            self?.mirror.stop()
+            exit(0)
+        }
+        dying.resume()
+        sigterm = dying
 
         mirror.locate { [weak self] in
             self?.syncMirror()

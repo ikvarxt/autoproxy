@@ -4,7 +4,7 @@ import XCTest
 final class MirrorCommandTests: XCTestCase {
     func testAlwaysNamesTheDevice() {
         // 插着两台时漏掉 -s，投出来的是另一台 —— 不报错，只是看着不对
-        XCTAssertEqual(Mirror.arguments(serial: "RFCW718JZCA"), ["-S", "-s", "RFCW718JZCA"])
+        XCTAssertEqual(Mirror.arguments(serial: "RFCW718JZCA").prefix(3), ["-S", "-s", "RFCW718JZCA"])
     }
 
     func testHandsScrcpyTheSameAdbWeUse() {
@@ -24,6 +24,44 @@ final class MirrorCommandTests: XCTestCase {
         let mirror = Mirror(executable: nil)
         mirror.start(serial: "X", adb: nil)
         XCTAssertNil(Mirror_session(of: mirror))
+    }
+}
+
+final class MirrorStrayTests: XCTestCase {
+    /// ps -axo pid=,ppid=,command= 的真实形状。ppid 1 = 父进程死了，它活下来了。
+    private let orphan = "85547 1 /opt/homebrew/bin/scrcpy -S -s RFCW718JZCA --window-title=AutoProxy-RFCW718JZCA"
+    private let theirs = "41203 1 /opt/homebrew/bin/scrcpy -s RFCY61GMGWD"
+    private let helper = "85560 85547 /opt/homebrew/share/android-commandlinetools/platform-tools/adb -s RFCW718JZCA "
+        + "shell CLASSPATH=/data/local/tmp/scrcpy-server.jar app_process / com.genymobile.scrcpy.Server"
+
+    func testFindsTheOneWeLeftBehind() {
+        XCTAssertEqual(Mirror.strays(in: orphan, mine: 99999), [85547])
+    }
+
+    func testLeavesTheUsersOwnSessionAlone() {
+        // 没打我们的标题就不是我们起的。杀错了是在掐别人正看着的屏
+        XCTAssertEqual(Mirror.strays(in: theirs, mine: 99999), [])
+    }
+
+    func testDoesNotMistakeScrcpysOwnAdbForAStray() {
+        // 它的命令行里也有 "scrcpy"，只有可执行文件本身能分辨
+        XCTAssertEqual(Mirror.strays(in: helper, mine: 99999), [])
+    }
+
+    func testNeverKillsTheSessionThisProcessIsRunning() {
+        // 不然启动清场那一下会把自己刚投上的收掉
+        let live = "86176 86022 /opt/homebrew/bin/scrcpy -S -s X --window-title=AutoProxy-X"
+        XCTAssertEqual(Mirror.strays(in: live, mine: 86022), [])
+    }
+
+    func testPicksOnlyOursOutOfAFullListing() {
+        let listing = [theirs, helper, orphan, "1 0 /sbin/launchd"].joined(separator: "\n")
+        XCTAssertEqual(Mirror.strays(in: listing, mine: 99999), [85547])
+    }
+
+    func testMarksTheWindowSoTheNextProcessCanFindIt() {
+        XCTAssertTrue(Mirror.arguments(serial: "RFCW718JZCA")
+            .contains("--window-title=AutoProxy-RFCW718JZCA"))
     }
 }
 

@@ -34,6 +34,13 @@ final class Mirror {
 
     static let candidates = ["/opt/homebrew/bin/scrcpy", "/usr/local/bin/scrcpy"]
 
+    /// 我们起的 scrcpy 窗口叫这个。用户自己开的不会有 —— 那种不碰、不杀。
+    ///
+    /// 标记打在窗口标题而不是环境变量上：孤儿的父进程已经是 launchd，
+    /// `ps -E` 读不到它的环境（试过，拿回来的是空的），命令行参数则谁都能看。
+    /// 顺带让人一眼看出这个窗口是谁开的。
+    static let windowTitle = "AutoProxy"
+
     /// scrcpy 自己会去找 adb，找到的可能不是我们正在用的那个。版本一对不上，
     /// 它会 kill 掉现有 server 重起一个 —— 所有 reverse 隧道跟着没，正在抓的包当场断。
     /// 所以把 adb 的位置直接交给它。
@@ -43,14 +50,44 @@ final class Mirror {
         return env
     }
 
+    /// 从 ps 输出里挑出上一条命留下的 scrcpy。
+    ///
+    /// 拆成纯函数是因为这里误判的代价不对称：漏掉只是多一个窗口，
+    /// 多杀一个就是把用户自己开着的投屏掐了。所以三个条件都要硬碰硬 ——
+    /// 可执行文件真的是 scrcpy（scrcpy 自己起的 adb 子进程命令行里也有 "scrcpy"）、
+    /// 窗口标题是我们打的、而且不是本进程正开着的那个。
+    static func strays(in listing: String, mine: Int32) -> [Int32] {
+        listing.split(separator: "\n").compactMap { line in
+            let fields = line.split(separator: " ", omittingEmptySubsequences: true)
+            guard fields.count >= 3,
+                  let pid = Int32(fields[0]),
+                  Int32(fields[1]) != mine,
+                  fields[2].hasSuffix("/scrcpy"),
+                  line.contains("--window-title=\(windowTitle)-") else { return nil }
+            return pid
+        }
+    }
+
+    /// 收掉前任留下的孤儿。被 SIGKILL、崩溃、部署脚本的 pkill 都会留下它：
+    /// 新进程拿不到那个 Process 对象就管不了它，再起一个就是两个窗口抢同一台设备。
+    static func clearStrays() {
+        let listed = Shell.run("/bin/ps", ["-axo", "pid=,ppid=,command="], timeout: 5)
+        guard listed.ok else { return }
+        for pid in strays(in: listed.out, mine: ProcessInfo.processInfo.processIdentifier) {
+            kill(pid, SIGTERM)
+        }
+    }
+
     /// 多台手机插着的时候漏掉 -s，投出来的是另一台 —— 不报错，只是看着不对。
     static func arguments(serial: String) -> [String] {
-        ["-S", "-s", serial]
+        ["-S", "-s", serial, "--window-title=\(windowTitle)-\(serial)"]
     }
 
     /// 跑登录 shell 十几秒起步，不能占着主线程。查完回主线程给结果。
     func locate(then done: @escaping () -> Void) {
         DispatchQueue.global(qos: .utility).async { [weak self] in
+            // 先清前任，不然待会儿对齐设备时又起一个，就是两个
+            Mirror.clearStrays()
             let found = Shell.locate("scrcpy", extraCandidates: Mirror.candidates)
             DispatchQueue.main.async {
                 self?.executable = found
