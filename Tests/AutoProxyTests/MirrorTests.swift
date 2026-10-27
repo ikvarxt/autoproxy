@@ -125,7 +125,7 @@ final class MirrorSessionTests: XCTestCase {
         // 探测是秒级的。起不来还一轮一轮拉，就成了后台闷头刷进程 —— 还不弹窗，没人看得见
         let mirror = Mirror(executable: try dyingScript().path)
         mirror.start(serial: "X", adb: nil)
-        settle()
+        waitUntilDead(mirror)
         mirror.start(serial: "X", adb: nil)
         XCTAssertNil(Mirror_session(of: mirror))
     }
@@ -134,7 +134,7 @@ final class MirrorSessionTests: XCTestCase {
         // 一次失手就得重启程序才肯再投,那还不如没有这个开关
         let mirror = Mirror(executable: try dyingScript().path)
         mirror.start(serial: "X", adb: nil)
-        settle()
+        waitUntilDead(mirror)
         mirror.stop()  // 拔线/关开关都走这儿
         mirror.start(serial: "X", adb: nil)
         XCTAssertNotNil(Mirror_session(of: mirror))
@@ -146,6 +146,15 @@ final class MirrorSessionTests: XCTestCase {
         let turned = expectation(description: "主线程转过一轮")
         DispatchQueue.main.asyncAfter(deadline: .now() + 0.4) { turned.fulfill() }
         wait(for: [turned], timeout: 2)
+    }
+
+    /// 等它自己死掉、善后跑完（会话被摘掉）。固定等几百毫秒在机器忙的时候不够。
+    private func waitUntilDead(_ mirror: Mirror) {
+        let deadline = Date().addingTimeInterval(5)
+        while Mirror_session(of: mirror) != nil, Date() < deadline {
+            RunLoop.current.run(until: Date().addingTimeInterval(0.05))
+        }
+        XCTAssertNil(Mirror_session(of: mirror), "假 scrcpy 5 秒内没退出")
     }
 
     /// 一个起来就死的假 scrcpy。

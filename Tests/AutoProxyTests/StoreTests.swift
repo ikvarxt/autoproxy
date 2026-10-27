@@ -35,6 +35,7 @@ final class StoreTests: XCTestCase {
         let store = Store(defaults: defaults)
         let phone = Device(serial: "S1", model: "SM_S9110", state: "device")
         store.port = 8888
+        store.activeSerial = phone.serial
         store.remember(device: phone, proxyOn: true, port: 8888)
 
         let stale = store.stale()
@@ -45,8 +46,21 @@ final class StoreTests: XCTestCase {
     func testClearedDeviceLeavesNoStaleRecord() {
         let store = Store(defaults: defaults)
         let phone = Device(serial: "S1", model: "SM_S9110", state: "device")
+        store.activeSerial = phone.serial
         store.remember(device: phone, proxyOn: true, port: 9000)
         store.remember(device: phone, proxyOn: false, port: 9000)
+
+        XCTAssertNil(store.stale())
+    }
+
+    func testOnlyTheLastConnectedPhoneCounts() {
+        // 很久以前那台的记录还标着开着，但上次连的是三星、它是干净的 —— 不该报那台
+        let store = Store(defaults: defaults)
+        store.remember(device: Device(serial: "OLD", model: "TrebleDroid_vanilla", state: "device"),
+                       proxyOn: true, port: 9000)
+        store.activeSerial = "S1"
+        store.remember(device: Device(serial: "S1", model: "SM_S9110", state: "device"),
+                       proxyOn: false, port: 9000)
 
         XCTAssertNil(store.stale())
     }

@@ -92,16 +92,12 @@ struct Store {
         defaults.set(proxyOn, forKey: Key.proxyOn(device.serial))
         defaults.set(device.model, forKey: Key.model(device.serial))
         defaults.set(port, forKey: Key.portFor(device.serial))
-
-        var seen = defaults.stringArray(forKey: Key.seen) ?? []
-        if !seen.contains(device.serial) {
-            seen.append(device.serial)
-            defaults.set(seen, forKey: Key.seen)
-        }
     }
 
+    /// 只看上次连的那台。更早的手机就算记录里还标着代理开着，也多半早就处理过了，
+    /// 拿出来报只会让人对着一台不在手边的手机发懵。
     func stale() -> StaleRecord? {
-        (defaults.stringArray(forKey: Key.seen) ?? []).lazy.compactMap(stale(serial:)).first
+        activeSerial.flatMap(stale(serial:))
     }
 
     func stale(serial: String) -> StaleRecord? {
@@ -120,7 +116,6 @@ struct Store {
         static let autoMirror = "autoMirror"
         static let relocationDeclined = "relocationDeclined"
         static let startWarningAcknowledged = "startWarningAcknowledged"
-        static let seen = "seenSerials"
         static func proxyOn(_ serial: String) -> String { "proxyOn.\(serial)" }
         static func model(_ serial: String) -> String { "model.\(serial)" }
         static func portFor(_ serial: String) -> String { "port.\(serial)" }
