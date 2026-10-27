@@ -68,7 +68,6 @@ final class InstallerTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        unregisterBundles(under: sandbox)
         try? FileManager.default.removeItem(at: sandbox)
     }
 
@@ -106,35 +105,13 @@ final class InstallerTests: XCTestCase {
         XCTAssertThrowsError(try Installer.unpack(zip: zip, expecting: Version("0.4.0")!))
     }
 
-    /// 造一个能被 open 起来又立刻退出的最小 .app
-    private func stubApp(named name: String, marker: String) throws -> URL {
-        let app = sandbox.appendingPathComponent(name)
-        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"),
-                                                withIntermediateDirectories: true)
-        try marker.write(to: app.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
-        let plist: [String: Any] = ["CFBundleIdentifier": "me.ikvarxt.autoproxy.swapstub",
-                                    "CFBundleExecutable": "stub"]
-        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-            .write(to: app.appendingPathComponent("Contents/Info.plist"))
-        let stub = app.appendingPathComponent("Contents/MacOS/stub")
-        try "#!/bin/sh\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
-        return app
-    }
-
     func testSwapReplacesTheBundleAndClearsTheBackup() throws {
-        let dest = try stubApp(named: "Installed.app", marker: "old")
-        let new = try stubApp(named: "New.app", marker: "new")
+        let dest = try stubApp(in: sandbox, named: "Installed.app", marker: "old")
+        let new = try stubApp(in: sandbox, named: "New.app", marker: "new")
 
-        // macOS 的 PID 上限是 99998，99999 保证不存在 —— 脚本不用等，直接进搬运
-        try Installer.scheduleSwap(newApp: new, over: dest, waitFor: 99999)
+        try swap(newApp: new, over: dest)
 
         let marker = dest.appendingPathComponent("marker")
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline, (try? String(contentsOf: marker, encoding: .utf8)) != "new" {
-            usleep(100_000)
-        }
-
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "new")
         XCTAssertFalse(FileManager.default.fileExists(atPath: new.path), "新包应该被搬走而不是留下副本")
         XCTAssertFalse(FileManager.default.fileExists(atPath: dest.path + ".old"), "备份该在搬完后清掉")

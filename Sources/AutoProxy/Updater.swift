@@ -253,9 +253,14 @@ enum Installer {
     /// 自我替换有个硬约束：进程活着的时候动不了自己的 bundle，所以搬运只能交给外部进程。
     /// 三步搬运（旧的挪走 → 新的就位 → 删旧的）里任何一步失败都还能退回旧版本；
     /// 写成「先删后拷」的话，拷贝一失败机器上就没有这个 app 了。
+    ///
+    /// 返回脚本进程只是给测试等它跑完用；`relaunch` 关掉也只为测试 ——
+    /// 真去 open 一个临时目录里的假 app，系统会把它登记进 LaunchServices，删了目录记录还在。
+    @discardableResult
     static func scheduleSwap(newApp: URL, over bundle: URL,
                              removing source: URL? = nil,
-                             waitFor pid: Int32 = ProcessInfo.processInfo.processIdentifier) throws {
+                             waitFor pid: Int32 = ProcessInfo.processInfo.processIdentifier,
+                             relaunch: Bool = true) throws -> Process {
         // 等待有上限：PID 可能被系统复用，无限等下去这次更新就永远搬不成。
         // 超时硬搬也是安全的 —— macOS 允许移动正在运行的 bundle，旧进程继续用已打开的 inode。
         let script = """
@@ -275,7 +280,9 @@ enum Installer {
           rm -rf "$SOURCE"
         fi
         xattr -dr com.apple.quarantine "$DEST" 2>/dev/null
-        open "$DEST"
+        if [ -n "$RELAUNCH" ]; then
+          open "$DEST"
+        fi
         """
 
         let path = FileManager.default.temporaryDirectory.appendingPathComponent("autoproxy-swap.sh")
@@ -291,6 +298,7 @@ enum Installer {
             "DEST": bundle.path,
             "BACKUP": bundle.path + ".old",
             "SOURCE": source?.path ?? "",
+            "RELAUNCH": relaunch ? "1" : "",
         ]
 
         do {
@@ -298,5 +306,6 @@ enum Installer {
         } catch {
             throw UpdateError.swapFailed("\(error)")
         }
+        return process
     }
 }

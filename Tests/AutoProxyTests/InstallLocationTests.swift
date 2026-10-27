@@ -95,70 +95,40 @@ final class RelocationTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
-        unregisterBundles(under: sandbox)
         try? FileManager.default.removeItem(at: sandbox)
     }
 
-    private func stubApp(named name: String, marker: String) throws -> URL {
-        let app = sandbox.appendingPathComponent(name)
-        try FileManager.default.createDirectory(at: app.appendingPathComponent("Contents/MacOS"),
-                                                withIntermediateDirectories: true)
-        try marker.write(to: app.appendingPathComponent("marker"), atomically: true, encoding: .utf8)
-        let plist: [String: Any] = ["CFBundleIdentifier": "me.ikvarxt.autoproxy.swapstub",
-                                    "CFBundleExecutable": "stub"]
-        try PropertyListSerialization.data(fromPropertyList: plist, format: .xml, options: 0)
-            .write(to: app.appendingPathComponent("Contents/Info.plist"))
-        let stub = app.appendingPathComponent("Contents/MacOS/stub")
-        try "#!/bin/sh\nexit 0\n".write(to: stub, atomically: true, encoding: .utf8)
-        try FileManager.default.setAttributes([.posixPermissions: 0o755], ofItemAtPath: stub.path)
-        return app
-    }
-
-    private func wait(for path: URL, toRead expected: String?) {
-        let deadline = Date().addingTimeInterval(10)
-        while Date() < deadline {
-            let actual = try? String(contentsOf: path, encoding: .utf8)
-            if actual == expected { return }
-            usleep(100_000)
-        }
-    }
-
     func testInstallsWhenNothingIsThereYet() throws {
-        let new = try stubApp(named: "New.app", marker: "fresh")
+        let new = try stubApp(in: sandbox, named: "New.app", marker: "fresh")
         let dest = sandbox.appendingPathComponent("Applications/AutoProxy.app")
         try FileManager.default.createDirectory(at: dest.deletingLastPathComponent(),
                                                 withIntermediateDirectories: true)
 
         // 首次安装时目标位置是空的。脚本要是无条件 mv 旧的去备份，这一步就直接失败了
-        try Installer.scheduleSwap(newApp: new, over: dest, waitFor: 99999)
+        try swap(newApp: new, over: dest)
 
         let marker = dest.appendingPathComponent("marker")
-        wait(for: marker, toRead: "fresh")
         XCTAssertEqual(try String(contentsOf: marker, encoding: .utf8), "fresh")
     }
 
     func testClearsTheCopyLeftBehindInDownloads() throws {
-        let staged = try stubApp(named: "Staged.app", marker: "fresh")
-        let source = try stubApp(named: "Downloads.app", marker: "fresh")
+        let staged = try stubApp(in: sandbox, named: "Staged.app", marker: "fresh")
+        let source = try stubApp(in: sandbox, named: "Downloads.app", marker: "fresh")
         let dest = sandbox.appendingPathComponent("AutoProxy.app")
 
-        try Installer.scheduleSwap(newApp: staged, over: dest, removing: source, waitFor: 99999)
+        try swap(newApp: staged, over: dest, removing: source)
 
-        wait(for: dest.appendingPathComponent("marker"), toRead: "fresh")
-        let deadline = Date().addingTimeInterval(5)
-        while Date() < deadline, FileManager.default.fileExists(atPath: source.path) { usleep(100_000) }
         XCTAssertFalse(FileManager.default.fileExists(atPath: source.path),
                        "原地那份该清掉，留着只会让人下次双击到旧的")
     }
 
     func testNeverDeletesTheThingItJustInstalled() throws {
-        let staged = try stubApp(named: "Staged.app", marker: "fresh")
+        let staged = try stubApp(in: sandbox, named: "Staged.app", marker: "fresh")
         let dest = sandbox.appendingPathComponent("AutoProxy.app")
 
         // 源和目标同一个位置时，「清掉源」这一步会把刚装好的删掉
-        try Installer.scheduleSwap(newApp: staged, over: dest, removing: dest, waitFor: 99999)
+        try swap(newApp: staged, over: dest, removing: dest)
 
-        wait(for: dest.appendingPathComponent("marker"), toRead: "fresh")
         XCTAssertEqual(try String(contentsOf: dest.appendingPathComponent("marker"), encoding: .utf8), "fresh")
     }
 }
