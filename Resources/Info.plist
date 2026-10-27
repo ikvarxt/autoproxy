@@ -6,6 +6,8 @@
 	<string>AutoProxy</string>
 	<key>CFBundleExecutable</key>
 	<string>AutoProxy</string>
+	<key>CFBundleIconFile</key>
+	<string>AppIcon</string>
 	<key>CFBundleIdentifier</key>
 	<string>me.ikvarxt.autoproxy</string>
 	<key>CFBundleName</key>

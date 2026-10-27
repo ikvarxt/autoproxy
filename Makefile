@@ -10,7 +10,7 @@ BUILD_NUMBER :=
 
 -include local.mk
 
-.PHONY: all build test app run deploy install uninstall clean
+.PHONY: all build test app icon run deploy install uninstall clean
 
 all: app
 
@@ -25,6 +25,8 @@ app: build
 	mkdir -p $(APP_BUNDLE)/Contents/MacOS $(APP_BUNDLE)/Contents/Resources
 	cp $(BUILD_DIR)/$(EXECUTABLE) $(APP_BUNDLE)/Contents/MacOS/$(APP_NAME)
 	cp Resources/Info.plist $(APP_BUNDLE)/Contents/Info.plist
+	swift scripts/make-icon.swift build/$(APP_NAME).iconset >/dev/null
+	iconutil -c icns build/$(APP_NAME).iconset -o $(APP_BUNDLE)/Contents/Resources/AppIcon.icns
 ifneq ($(VERSION),)
 	/usr/libexec/PlistBuddy -c "Set :CFBundleShortVersionString $(VERSION)" $(APP_BUNDLE)/Contents/Info.plist
 endif
@@ -33,6 +35,9 @@ ifneq ($(BUILD_NUMBER),)
 endif
 	codesign --force --sign "$(SIGN_IDENTITY)" $(APP_BUNDLE)
 	@echo "built $(APP_BUNDLE)"
+
+icon:
+	swift scripts/make-icon.swift build/$(APP_NAME).iconset
 
 run: app
 	pkill -x $(APP_NAME) || true
