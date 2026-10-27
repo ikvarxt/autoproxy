@@ -51,6 +51,17 @@ final class StoreTests: XCTestCase {
         XCTAssertNil(store.stale())
     }
 
+    func testRecordIsLookedUpPerPhone() {
+        let store = Store(defaults: defaults)
+        store.remember(device: Device(serial: "OLD", model: "TrebleDroid_vanilla", state: "device"),
+                       proxyOn: true, port: 9000)
+        store.remember(device: Device(serial: "S1", model: "SM_S9110", state: "device"),
+                       proxyOn: false, port: 9000)
+
+        XCTAssertNil(store.stale(serial: "S1"), "别的手机的记录不能算到这台头上")
+        XCTAssertEqual(store.stale(serial: "OLD")?.model, "TrebleDroid vanilla")
+    }
+
     func testAutoReconnectIsOnUntilTurnedOff() {
         let store = Store(defaults: defaults)
         XCTAssertTrue(store.autoReconnect)

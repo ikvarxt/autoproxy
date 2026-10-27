@@ -209,9 +209,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     /// 拔线时手机上的代理还开着 —— 那台手机此刻是上不了网的，而人多半已经走了。
     /// 这件事不能只写在菜单里等人来看，得推到通知中心去。
     private func announceStranded() {
-        guard let record = stranded.announce(state) else { return }
+        guard let record = stranded.departed(present, record: coordinator.store.stale(serial:)) else { return }
         notifier.post(
-            title: "\(record.model) 现在上不了网",
+            title: "刚拔下的手机现在上不了网",
             body: "线拔了，但代理设置还留在手机上指着 127.0.0.1:\(record.port)。"
                 + "手机上没有入口能关掉它，重启也不管用 —— 插回这台 Mac，点「停止代理」才能恢复。"
         )

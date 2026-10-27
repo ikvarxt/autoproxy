@@ -101,12 +101,14 @@ struct Store {
     }
 
     func stale() -> StaleRecord? {
-        for serial in defaults.stringArray(forKey: Key.seen) ?? [] where defaults.bool(forKey: Key.proxyOn(serial)) {
-            let model = defaults.string(forKey: Key.model(serial)) ?? serial
-            let port = defaults.integer(forKey: Key.portFor(serial))
-            return StaleRecord(model: model.replacingOccurrences(of: "_", with: " "), port: port > 0 ? port : 9000)
-        }
-        return nil
+        (defaults.stringArray(forKey: Key.seen) ?? []).lazy.compactMap(stale(serial:)).first
+    }
+
+    func stale(serial: String) -> StaleRecord? {
+        guard defaults.bool(forKey: Key.proxyOn(serial)) else { return nil }
+        let model = defaults.string(forKey: Key.model(serial)) ?? serial
+        let port = defaults.integer(forKey: Key.portFor(serial))
+        return StaleRecord(model: model.replacingOccurrences(of: "_", with: " "), port: port > 0 ? port : 9000)
     }
 
     private enum Key {

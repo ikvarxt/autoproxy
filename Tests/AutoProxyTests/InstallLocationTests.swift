@@ -37,40 +37,50 @@ final class InstallLocationTests: XCTestCase {
 }
 
 final class StrandedAlerterTests: XCTestCase {
-    private let phone = Device(serial: "abc", model: "Pixel_7", state: "device")
+    private let samsung = Device(serial: "RFCW718JZCA", model: "SM_S9110", state: "device")
+    private let pixel = Device(serial: "abc", model: "Pixel_7", state: "device")
+    private let left = StaleRecord(model: "SM S9110", port: 9000)
 
-    func testAnnouncesOnceWhileTheStateHolds() {
+    func testAnnouncesTheMomentTheCapturingPhoneIsUnplugged() {
         var alerter = StrandedAlerter()
-        let stranded = CaptureState.offlineStranded(model: "Pixel 7", port: 9000)
-
-        XCTAssertEqual(alerter.announce(stranded), StaleRecord(model: "Pixel 7", port: 9000))
-        // 这状态一直挂到手机插回来，而探测每 3 秒一轮 —— 每轮都响就是骚扰
-        XCTAssertNil(alerter.announce(stranded))
-        XCTAssertNil(alerter.announce(stranded))
+        XCTAssertNil(alerter.departed([samsung]) { _ in self.left })
+        XCTAssertEqual(alerter.departed([]) { _ in self.left }, left)
     }
 
-    func testAnnouncesAgainAfterTheDeviceComesBackAndLeavesOnceMore() {
+    func testAnnouncesOnceWhileItStaysUnplugged() {
+        // 探测每 3 秒一轮，每轮都响就是骚扰
         var alerter = StrandedAlerter()
-        let stranded = CaptureState.offlineStranded(model: "Pixel 7", port: 9000)
-
-        XCTAssertNotNil(alerter.announce(stranded))
-        XCTAssertNil(alerter.announce(.capturing(phone)))
-        XCTAssertNotNil(alerter.announce(stranded), "插回来又拔走是新的一次，该再提醒")
+        _ = alerter.departed([samsung]) { _ in self.left }
+        XCTAssertNotNil(alerter.departed([]) { _ in self.left })
+        XCTAssertNil(alerter.departed([]) { _ in self.left })
     }
 
-    func testAnotherPhoneOrPortIsANewSituation() {
+    func testAnnouncesAgainAfterItComesBackAndLeavesOnceMore() {
         var alerter = StrandedAlerter()
-        XCTAssertNotNil(alerter.announce(.offlineStranded(model: "Pixel 7", port: 9000)))
-        XCTAssertNotNil(alerter.announce(.offlineStranded(model: "Galaxy S23", port: 9000)))
-        XCTAssertNotNil(alerter.announce(.offlineStranded(model: "Galaxy S23", port: 8888)))
+        _ = alerter.departed([samsung]) { _ in self.left }
+        _ = alerter.departed([]) { _ in self.left }
+        _ = alerter.departed([samsung]) { _ in self.left }
+        XCTAssertNotNil(alerter.departed([]) { _ in self.left }, "插回来又拔走是新的一次")
     }
 
-    func testStaysQuietForEveryOtherState() {
+    func testIgnoresOldRecordsOfPhonesThatWereNotJustUnplugged() {
+        // 拔的是三星、它没开代理，记录里却有台很久以前的手机标着「开着」—— 不能拿那台来报
         var alerter = StrandedAlerter()
-        for state in [CaptureState.noDevice, .adbMissing, .capturing(phone),
-                      .ready(phone, portListening: true), .brokenLink(phone, reason: "x")] {
-            XCTAssertNil(alerter.announce(state))
-        }
+        let records = ["8ADX0R5D0": StaleRecord(model: "TrebleDroid vanilla", port: 9000)]
+        _ = alerter.departed([samsung]) { records[$0] }
+        XCTAssertNil(alerter.departed([]) { records[$0] })
+    }
+
+    func testStaysQuietAtLaunchEvenIfARecordIsLeftOver() {
+        // 启动时什么都没插不等于「刚拔了线」，那条记录留给菜单去说
+        var alerter = StrandedAlerter()
+        XCTAssertNil(alerter.departed([]) { _ in self.left })
+    }
+
+    func testUnpluggingOneOfTwoStillCounts() {
+        var alerter = StrandedAlerter()
+        _ = alerter.departed([samsung, pixel]) { _ in nil }
+        XCTAssertEqual(alerter.departed([pixel]) { $0 == "RFCW718JZCA" ? self.left : nil }, left)
     }
 }
 
