@@ -5,6 +5,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     private let coordinator = Coordinator()
     private lazy var updater = Updater(store: coordinator.store)
     private let notifier = Notifier()
+    private let mirror = Mirror()
     private let statusItem = NSStatusBar.system.statusItem(withLength: NSStatusItem.variableLength)
     private let probeQueue = DispatchQueue(label: "me.ikvarxt.autoproxy.probe")
 
@@ -33,6 +34,12 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             monitor?.start()
         }
 
+        mirror.onFailure = { [weak self] detail in self?.warn("投屏没起来", detail) }
+        mirror.locate { [weak self] in
+            self?.renderedKey = ""
+            self?.render()
+        }
+
         notifier.onOpen = { [weak self] in self?.showStrandedHelp() }
         notifier.fallback = { [weak self] title, body in self?.warn(title, body) }
         notifier.start()
@@ -54,6 +61,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
     func applicationWillTerminate(_ notification: Notification) {
         monitor?.stop()
         updater.stop()
+        mirror.stop()
         // 这条不能挪到后台：异步派发出去，进程已经走完退出流程，手机上的代理就留着了
         if case .capturing(let device) = state { coordinator.stop(device) }
     }
@@ -97,6 +105,9 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         else { return }
 
         lastRecovery = (device.serial, Date())
+        // 只有 restoreLink 这一档算「又开始抓了」。repairTunnel 是代理一直开着、
+        // 半路掉了条隧道，那段时间窗口早就在抓包，再弹个窗口只是打扰。
+        if result.recovery == .restoreLink { startMirroring(device) }
         probeQueue.async { [weak self] in
             guard let self else { return }
             self.coordinator.recover(result.recovery, device: device)
@@ -127,8 +138,10 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         case .ready(let device, _):
             guard confirmStart(device) else { return }
             perform { self.coordinator.start(device) }
+            startMirroring(device)
         case .capturing(let device), .brokenLink(let device, _):
             perform { self.coordinator.stop(device) }
+            mirror.stop()
         default: return
         }
     }
@@ -158,6 +171,11 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
             let problem = self.coordinator.switchTo(target, carryProxy: carryProxy)
             DispatchQueue.main.async {
                 if let problem { self.warn("代理没能跟着切过来", problem) }
+                // 投屏跟着代理走：代理去哪台，画面就该是哪台
+                if carryProxy {
+                    self.mirror.stop()
+                    if problem == nil { self.startMirroring(target) }
+                }
                 self.refresh()
             }
         }
@@ -377,6 +395,18 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         exit(0)
     }
 
+    /// 要不要投是开关的事，这里只负责认定「现在是开代理的时刻」。
+    private func startMirroring(_ device: Device) {
+        guard coordinator.store.autoMirror, mirror.available else { return }
+        mirror.start(serial: device.serial, adb: coordinator.adb?.path)
+    }
+
+    @objc private func toggleAutoMirror() {
+        coordinator.store.autoMirror = !coordinator.store.autoMirror
+        renderedKey = ""
+        render()
+    }
+
     @objc private func toggleAutoUpdate() {
         coordinator.store.autoUpdate = !coordinator.store.autoUpdate
         renderedKey = ""
@@ -469,6 +499,7 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         state.headline + "|" + present.map(\.serial).joined(separator: ",")
             + "|" + (coordinator.store.activeSerial ?? "")
             + "|" + (updater.staged.map { "\($0.version)" } ?? "")
+            + "|" + (mirror.available ? "scrcpy" : "")
     }
 
     private func render() {
@@ -530,6 +561,14 @@ final class MenuController: NSObject, NSApplicationDelegate, NSMenuDelegate {
         auto.target = self
         auto.state = coordinator.store.autoReconnect ? .on : .off
         menu.addItem(auto)
+
+        // action 留空即自动置灰：没装 scrcpy 时这个开关打开也没有任何效果
+        let mirrorItem = NSMenuItem(title: mirror.available ? "开启代理时自动投屏" : "开启代理时自动投屏（要先装 scrcpy）",
+                                    action: mirror.available ? #selector(toggleAutoMirror) : nil,
+                                    keyEquivalent: "")
+        mirrorItem.target = self
+        mirrorItem.state = coordinator.store.autoMirror ? .on : .off
+        menu.addItem(mirrorItem)
 
         let update = NSMenuItem(title: "每天检查更新", action: #selector(toggleAutoUpdate), keyEquivalent: "")
         update.target = self

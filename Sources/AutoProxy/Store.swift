@@ -50,6 +50,15 @@ struct Store {
         }
     }
 
+    /// 默认关：投屏会抢走手机屏幕（-S 直接把它关掉），不是每个人开代理都想要这个。
+    var autoMirror: Bool {
+        get { defaults.bool(forKey: Key.autoMirror) }
+        nonmutating set {
+            defaults.set(newValue, forKey: Key.autoMirror)
+            defaults.synchronize()
+        }
+    }
+
     var relocationDeclined: Bool {
         get { defaults.bool(forKey: Key.relocationDeclined) }
         nonmutating set {
@@ -106,6 +115,7 @@ struct Store {
         static let activeSerial = "activeSerial"
         static let autoUpdate = "autoUpdate"
         static let lastUpdateCheck = "lastUpdateCheck"
+        static let autoMirror = "autoMirror"
         static let relocationDeclined = "relocationDeclined"
         static let startWarningAcknowledged = "startWarningAcknowledged"
         static let seen = "seenSerials"
