@@ -68,6 +68,7 @@ final class InstallerTests: XCTestCase {
     }
 
     override func tearDownWithError() throws {
+        unregisterBundles(under: sandbox)
         try? FileManager.default.removeItem(at: sandbox)
     }
 
